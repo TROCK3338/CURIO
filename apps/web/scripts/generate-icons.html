@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generate PWA Icons</title>
+  <style>
+    body { font-family: system-ui; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    .icon-preview { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 1rem; margin: 1rem 0; }
+    .icon-item { text-align: center; }
+    .icon-item img { width: 100px; height: 100px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .icon-item label { display: block; margin-top: 0.5rem; font-size: 0.875rem; color: #666; }
+    button { background: #6366f1; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+    button:hover { background: #4f46e5; }
+    .instructions { background: #fef3c7; border: 1px solid #fcd34d; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
+  </style>
+</head>
+<body>
+  <h1>🎨 Generate PWA Icons</h1>
+  <p>This page helps you generate all required icon sizes from the SVG source.</p>
+
+  <div class="instructions">
+    <h3>📋 Instructions</h3>
+    <ol>
+      <li>Click "Generate Icons" below</li>
+      <li>Right-click each icon → "Save image as..."</li>
+      <li>Save to <code>public/icons/</code> with the exact filenames shown</li>
+      <li>Or use an online tool like <a href="https://www.pwabuilder.com/imageGenerator" target="_blank">PWA Builder Image Generator</a></li>
+    </ol>
+  </div>
+
+  <button onclick="generateIcons()">🎨 Generate All Icons</button>
+
+  <div class="icon-preview" id="preview"></div>
+
+  <script>
+    const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
+    const svg = document.querySelector('svg') || createSVG();
+
+    function createSVG() {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        <defs>
+          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+          </linearGradient>
+        </defs>
+        <rect width="512" height="512" rx="100" fill="url(#grad)"/>
+        <path d="M256 120c-44 0-80 36-80 80s36 80 80 80 80-36 80-80-36-80-80-80zm0 140c-33 0-60-27-60-60s27-60 60-60 60 27 60 60-27 60-60 60z" fill="white"/>
+        <circle cx="256" cy="256" r="20" fill="white"/>
+        <path d="M320 352c0-35-29-64-64-64H192c-35 0-64 29-64 64" fill="none" stroke="white" stroke-width="16" stroke-linecap="round"/>
+      </svg>`;
+    }
+
+    function generateIcons() {
+      const container = document.getElementById('preview');
+      container.innerHTML = '';
+
+      sizes.forEach(size => {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+
+        // Draw gradient background
+        const grad = ctx.createLinearGradient(0, 0, size, size);
+        grad.addColorStop(0, '#6366f1');
+        grad.addColorStop(1, '#8b5cf6');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(0, 0, size, size, size * 0.2);
+        ctx.fill();
+
+        // Draw brain icon (simplified)
+        ctx.fillStyle = 'white';
+        const center = size / 2;
+        const r = size * 0.156;
+        ctx.beginPath();
+        ctx.arc(center, center, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Brain wrinkles
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = size * 0.03;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(center - r * 0.5, center + r * 0.5);
+        ctx.bezierCurveTo(
+          center - r * 0.8, center,
+          center, center - r * 0.8,
+          center + r * 0.5, center - r * 0.5
+        );
+        ctx.stroke();
+
+        const dataUrl = canvas.toDataURL('image/png');
+
+        const item = document.createElement('div');
+        item.className = 'icon-item';
+        item.innerHTML = `
+          <img src="${dataUrl}" alt="Icon ${size}x${size}">
+          <label>icon-${size}x${size}.png</label>
+        `;
+        container.appendChild(item);
+      });
+    }
+  </script>
+</body>
+</html>

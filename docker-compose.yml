@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # Ollama for local AI (optional - for when you have a Mac/GPU)
+  # Uncomment and run: docker compose up -d ollama
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mindspace-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # For Apple Silicon Mac: no changes needed
+    # For NVIDIA GPU: add deploy.resources.reservations.devices (see docs)
+    profiles:
+      - local-ai
+
+  # Local Turso replica (optional - for offline development)
+  # turso:
+  #   image: ghcr.io/turso-extended/libsql:latest
+  #   container_name: mindspace-turso
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - turso_data:/data
+  #   command: ["/libsql-server", "--config", "/data/config.toml"]
+  #   profiles:
+  #     - local-db
+
+volumes:
+  ollama_data:
+  # turso_data:
+
+# Usage:
+# docker compose --profile local-ai up -d
+# docker compose --profile local-db up -d
+# 
+# Then pull models:
+# docker exec -it mindspace-ollama ollama pull nomic-embed-text
+# docker exec -it mindspace-ollama ollama pull llama3.2:3b
+# 
+# Update .env to use local:
+# GEMINI_API_KEY= (leave empty to use local)
+# OLLAMA_BASE_URL=http://localhost:11434

@@ -1,0 +1,24 @@
+{
+  "name": "@mindspace/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "tsc --noEmit",
+    "db:push": "node scripts/push-schema.js",
+    "db:studio": "turso db shell mindspace --command '.schema'",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.6.0",
+    "@google/generative-ai": "^0.11.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0",
+    "vercel": "^34.0.0"
+  }
+}

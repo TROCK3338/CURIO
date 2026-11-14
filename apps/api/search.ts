@@ -1,0 +1,87 @@
+/**
+ * GET /api/search
+ * Semantic + keyword search over saved items
+ */
+
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { z } from 'zod';
+import { getDb, initializeSchema, searchItems, semanticSearch } from './lib/db';
+import { generateEmbedding } from './lib/gemini';
+import type { SearchRequest, SearchResponse, Platform } from '@mindspace/shared';
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+const SearchSchema = z.object({
+  q: z.string().default(''),
+  platform: z.enum([
+    'instagram', 'tiktok', 'x', 'youtube', 'reddit',
+    'pinterest', 'linkedin', 'threads', 'bluesky', 'generic'
+  ]).optional(),
+  tags: z.string().optional(), // comma-separated
+  dateFrom: z.string().datetime().optional(),
+  dateTo: z.string().datetime().optional(),
+  limit: z.coerce.number().min(1).max(100).default(20),
+  offset: z.coerce.number().min(0).default(0),
+  semantic: z.coerce.boolean().default(true),
+});
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'OPTIONS') {
+    return res.status(200).set(CORS_HEADERS).send('');
+  }
+
+  if (req.method !== 'GET') {
+    return res.status(405).set(CORS_HEADERS).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    await initializeSchema();
+
+    const parseResult = SearchSchema.safeParse(req.query);
+    if (!parseResult.success) {
+      return res.status(400).set(CORS_HEADERS).json({
+        error: 'Invalid query parameters',
+        details: parseResult.error.flatten(),
+      });
+    }
+
+    const { q, platform, tags, dateFrom, dateTo, limit, offset, semantic } = parseResult.data;
+
+    const filters = {
+      platform,
+      tags: tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+      dateFrom,
+      dateTo,
+    };
+
+    let result;
+
+    if (semantic && q.trim()) {
+      // Semantic search: generate embedding for query
+      const queryEmbedding = await generateEmbedding(q);
+      result = await semanticSearch(queryEmbedding, filters, limit, offset);
+    } else {
+      // Keyword search
+      result = await searchItems(q, filters, limit, offset);
+    }
+
+    // Omit embeddings from response
+    const items = result.items.map(({ embedding, ...item }) => item);
+
+    return res.status(200).set(CORS_HEADERS).json({
+      items,
+      total: result.total,
+      hasMore: offset + items.length < result.total,
+    } as SearchResponse);
+
+  } catch (error) {
+    console.error('[Search] Error:', error);
+    return res.status(500).set(CORS_HEADERS).json({
+      error: error instanceof Error ? error.message : 'Internal server error',
+    });
+  }
+}
