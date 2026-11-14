@@ -7,7 +7,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { getDb, initializeSchema, searchItems } from './lib/db';
 import { generateEmbedding, chatWithSaves } from './lib/gemini';
-import type { ChatRequest, ChatResponse, SavedItem } from '@mindspace/shared';
+import type { ChatRequest, ChatResponse, SavedItem } from './lib/types';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -30,20 +30,17 @@ const ChatSchema = z.object({
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method === 'OPTIONS') {
-    return res.status(200).set(CORS_HEADERS).send('');
-  }
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
 
-  if (req.method !== 'POST') {
-    return res.status(405).set(CORS_HEADERS).json({ error: 'Method not allowed' });
-  }
+  if (req.method === 'OPTIONS') return res.status(200).send('');
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
     await initializeSchema();
 
     const parseResult = ChatSchema.safeParse(req.body);
     if (!parseResult.success) {
-      return res.status(400).set(CORS_HEADERS).json({
+      return res.status(400).json({
         error: 'Invalid request',
         details: parseResult.error.flatten(),
       });
@@ -51,22 +48,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { message, contextLimit, filter } = parseResult.data;
 
-    // First, find relevant items using semantic search
+    // Find relevant items using semantic search
     const queryEmbedding = await generateEmbedding(message);
     const { items } = await searchItems('', filter || {}, contextLimit * 2, 0);
 
-    // If we have items, use semantic search to rank them
     let relevantItems: SavedItem[] = items;
     if (items.length > 0) {
-      // Re-rank by vector similarity (already done in semanticSearch)
-      // For now, just use keyword search results
       relevantItems = items.slice(0, contextLimit);
     }
 
-    // Generate response using RAG
     const result = await chatWithSaves(message, relevantItems, contextLimit);
 
-    return res.status(200).set(CORS_HEADERS).json({
+    return res.status(200).json({
       answer: result.answer,
       citations: result.citations,
       relatedItems: relevantItems.map(({ embedding, ...item }) => item),
@@ -74,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error) {
     console.error('[Chat] Error:', error);
-    return res.status(500).set(CORS_HEADERS).json({
+    return res.status(500).json({
       error: error instanceof Error ? error.message : 'Internal server error',
     });
   }

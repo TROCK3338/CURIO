@@ -4,9 +4,9 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDb, initializeSchema } from './lib/db';
+import { getDb, initializeSchema, saveClusters } from './lib/db';
 import { generateClusters } from './lib/gemini';
-import type { SavedItem } from '@mindspace/shared';
+import type { SavedItem } from './lib/types';
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -45,9 +45,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 async function runClusterGeneration() {
   const db = getDb();
 
-  // Fetch recent enriched items
   const result = await db.execute({
     sql: `SELECT * FROM items WHERE enrichment_status = 'enriched' ORDER BY saved_at DESC LIMIT 1000`,
+    args: [],
   });
 
   const items: SavedItem[] = result.rows.map(row => ({
@@ -59,7 +59,7 @@ async function runClusterGeneration() {
     summary: row.summary as string | null,
     tags: row.tags ? JSON.parse(row.tags as string) : [],
     entities: row.entities ? JSON.parse(row.entities as string) : {},
-    embedding: row.embedding ? new Float32Array(row.embedding as ArrayBuffer).slice() : null,
+    embedding: row.embedding ? Array.from(new Float32Array(row.embedding as ArrayBuffer)) : null,
     mediaUrl: row.media_url as string | null,
     thumbnailUrl: row.thumbnail_url as string | null,
     authorUsername: row.author_username as string | null,
@@ -78,7 +78,6 @@ async function runClusterGeneration() {
 
   const clusters = await generateClusters(items);
 
-  // Save clusters
   const now = new Date().toISOString();
   const clusterRows = clusters.map(c => ({
     id: c.id,
@@ -93,20 +92,7 @@ async function runClusterGeneration() {
     generated_at: now,
   }));
 
-  await db.batch(clusterRows.map(c => ({
-    sql: `
-      INSERT INTO clusters (id, label, description, item_count, tags, representative_items, generated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        label = excluded.label,
-        description = excluded.description,
-        item_count = excluded.item_count,
-        tags = excluded.tags,
-        representative_items = excluded.representative_items,
-        generated_at = excluded.generated_at
-    `,
-    args: [c.id, c.label, c.description, c.item_count, c.tags, c.representative_items, c.generated_at],
-  })));
+  await saveClusters(clusterRows);
 
   console.log(`[Cron] Generated ${clusters.length} clusters`);
 }
@@ -114,7 +100,6 @@ async function runClusterGeneration() {
 async function runCleanup() {
   const db = getDb();
 
-  // Delete failed enrichment items older than 7 days
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const result = await db.execute({
@@ -122,5 +107,5 @@ async function runCleanup() {
     args: [sevenDaysAgo],
   });
 
-  console.log(`[Cron] Cleaned up ${result.changes} failed items`);
+  console.log(`[Cron] Cleaned up ${(result as any).changes ?? 0} failed items`);
 }

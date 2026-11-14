@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { getDb, initializeSchema, upsertItem } from './lib/db';
 import { processItem, generateEmbedding } from './lib/gemini';
 import { detectPlatform, enrichUrl, extractShortcode, quickEntityExtraction } from './lib/extractor';
-import type { SavedItem, IngestRequest, IngestResponse, Platform } from '@mindspace/shared';
+import type { SavedItem, IngestRequest, IngestResponse, Platform } from './lib/types';
 
 // ============================================
 // Request Validation
@@ -34,12 +34,17 @@ const CORS_HEADERS = {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS preflight
   if (req.method === 'OPTIONS') {
-    return res.status(200).set(CORS_HEADERS).send('');
+    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+    return res.status(200).send('');
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).set(CORS_HEADERS).json({ success: false, error: 'Method not allowed' });
+    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+    return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
+
+  // Set CORS headers for all responses
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
 
   try {
     // Initialize DB schema on first request (idempotent)
@@ -48,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Validate request
     const parseResult = IngestSchema.safeParse(req.body);
     if (!parseResult.success) {
-      return res.status(400).set(CORS_HEADERS).json({
+      return res.status(400).json({
         success: false,
         error: 'Invalid request',
         details: parseResult.error.flatten(),
@@ -66,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (existing.rows.length > 0) {
       const existingId = existing.rows[0].id as string;
-      return res.status(200).set(CORS_HEADERS).json({
+      return res.status(200).json({
         success: true,
         item: { id: existingId, url },
         message: 'Already saved',
@@ -89,9 +94,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const processed = await processItem(
       url,
       platform,
-      title || enriched.title,
+      title ?? enriched.title ?? null,
       combinedNote || null,
-      // Media context could be added here if we had video analysis
     );
 
     // Merge entities (AI + quick)
@@ -103,28 +107,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       combinedNote,
       processed.summary,
       processed.tags.join(' '),
-      Object.values(mergedEntities).flatMap(e => Object.values(e)).join(' '),
+      Object.values(mergedEntities).flatMap(e => Object.values(e as Record<string, unknown>)).filter(v => typeof v === 'string').join(' '),
     ].filter(Boolean).join('\n');
 
     const embedding = await generateEmbedding(embeddingText);
 
-    // Build item
+    // Build item - ensure all optional fields are null not undefined
     const now = new Date().toISOString();
     const item: SavedItem = {
       id: crypto.randomUUID(),
       url,
       platform,
-      title: title || enriched.title,
+      title: (title ?? enriched.title) ?? null,
       userNote: combinedNote || null,
       summary: processed.summary,
       tags: [...new Set([...processed.tags, platform, ...(enriched.tags || [])])],
       entities: mergedEntities,
       embedding: Array.from(embedding),
-      mediaUrl: enriched.mediaUrl,
-      thumbnailUrl: enriched.thumbnailUrl,
-      authorUsername: enriched.authorUsername || extractShortcode(url, platform),
-      authorDisplayName: enriched.authorDisplayName,
-      publishedAt: enriched.publishedAt,
+      mediaUrl: enriched.mediaUrl ?? null,
+      thumbnailUrl: enriched.thumbnailUrl ?? null,
+      authorUsername: (enriched.authorUsername ?? extractShortcode(url, platform) ?? null) as string | null,
+      authorDisplayName: enriched.authorDisplayName ?? null,
+      publishedAt: enriched.publishedAt ?? null,
       savedAt: now,
       updatedAt: now,
       enrichmentStatus: 'enriched',
@@ -136,14 +140,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Return success (omit embedding for response size)
     const { embedding: _, ...responseItem } = item;
-    return res.status(200).set(CORS_HEADERS).json({
+    return res.status(200).json({
       success: true,
       item: responseItem,
     } as IngestResponse);
 
   } catch (error) {
     console.error('[Ingest] Error:', error);
-    return res.status(500).set(CORS_HEADERS).json({
+    return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Internal server error',
     } as IngestResponse);

@@ -1,13 +1,12 @@
 /**
  * GET /api/clusters
  * Returns AI-generated thematic clusters of saved items
- * Also used by cron job to regenerate clusters periodically
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDb, initializeSchema, getLatestClusters, saveClusters } from './lib/db';
 import { generateClusters } from './lib/gemini';
-import type { ClusterResponse, SavedItem } from '@mindspace/shared';
+import type { ClusterResponse, SavedItem } from './lib/types';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -16,15 +15,14 @@ const CORS_HEADERS = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method === 'OPTIONS') {
-    return res.status(200).set(CORS_HEADERS).send('');
-  }
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+
+  if (req.method === 'OPTIONS') return res.status(200).send('');
 
   try {
     await initializeSchema();
 
     if (req.method === 'POST') {
-      // Regenerate clusters (called by cron or manually)
       return await regenerateClusters(req, res);
     }
 
@@ -40,14 +38,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       representativeItems: JSON.parse(c.representative_items),
     }));
 
-    return res.status(200).set(CORS_HEADERS).json({
+    return res.status(200).json({
       clusters: formatted,
       generatedAt: clusters[0]?.generated_at || new Date().toISOString(),
     } as ClusterResponse);
 
   } catch (error) {
     console.error('[Clusters] Error:', error);
-    return res.status(500).set(CORS_HEADERS).json({
+    return res.status(500).json({
       error: error instanceof Error ? error.message : 'Internal server error',
     });
   }
@@ -56,12 +54,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 async function regenerateClusters(req: VercelRequest, res: VercelResponse) {
   const db = getDb();
 
-  // Fetch recent items for clustering (last 1000)
   const result = await db.execute({
     sql: `SELECT * FROM items WHERE enrichment_status = 'enriched' ORDER BY saved_at DESC LIMIT 1000`,
+    args: [],
   });
 
-  // Convert to SavedItem type
   const items: SavedItem[] = result.rows.map(row => ({
     id: row.id as string,
     url: row.url as string,
@@ -71,7 +68,7 @@ async function regenerateClusters(req: VercelRequest, res: VercelResponse) {
     summary: row.summary as string | null,
     tags: row.tags ? JSON.parse(row.tags as string) : [],
     entities: row.entities ? JSON.parse(row.entities as string) : {},
-    embedding: row.embedding ? new Float32Array(row.embedding as ArrayBuffer).slice() : null,
+    embedding: row.embedding ? Array.from(new Float32Array(row.embedding as ArrayBuffer)) : null,
     mediaUrl: row.media_url as string | null,
     thumbnailUrl: row.thumbnail_url as string | null,
     authorUsername: row.author_username as string | null,
@@ -84,17 +81,15 @@ async function regenerateClusters(req: VercelRequest, res: VercelResponse) {
   }));
 
   if (items.length < 5) {
-    return res.status(200).set(CORS_HEADERS).json({
+    return res.status(200).json({
       clusters: [],
       generatedAt: new Date().toISOString(),
       message: 'Not enough items for clustering',
     });
   }
 
-  // Generate clusters with AI
   const clusters = await generateClusters(items);
 
-  // Save to database
   const now = new Date().toISOString();
   const clusterRows = clusters.map(c => ({
     id: c.id,
@@ -111,7 +106,7 @@ async function regenerateClusters(req: VercelRequest, res: VercelResponse) {
 
   await saveClusters(clusterRows);
 
-  return res.status(200).set(CORS_HEADERS).json({
+  return res.status(200).json({
     clusters,
     generatedAt: now,
     message: `Generated ${clusters.length} clusters`,

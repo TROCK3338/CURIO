@@ -5,7 +5,7 @@
  */
 
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
-import type { SavedItem, ExtractedEntities, Platform } from '@mindspace/shared';
+import type { SavedItem, ExtractedEntities, Platform } from './types';
 
 // ============================================
 // Configuration
@@ -18,7 +18,6 @@ if (!GEMINI_API_KEY) {
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-// Model configuration
 const FLASH_MODEL = 'gemini-1.5-flash';
 const EMBEDDING_MODEL = 'text-embedding-004';
 
@@ -40,9 +39,9 @@ const generationConfig = {
 // Prompt Templates
 // ============================================
 
-const SYSTEM_PROMPT = `You are an AI assistant that processes saved content from social media and the web.
-Your job: summarize, tag, and extract structured entities from the content provided.
-Be concise, accurate, and consistent.`;
+const SYSTEM_PROMPT = `You are MindSpace, an AI that helps users organize and retrieve their saved content.
+You process content from social media (Instagram, TikTok, X, YouTube, etc.) and the web.
+Be concise, accurate, and helpful. Never hallucinate. If unsure, say so.`;
 
 const TAGGING_PROMPT = `Analyze the content and return 3-8 relevant tags.
 Tags should be lowercase, singular, from this preferred vocabulary:
@@ -69,7 +68,7 @@ interface ExtractedEntities {
 
 Only include entities that are clearly present. If none, return {}.`;
 
-const CHAT_PROMPT = (context: string) => `You are a helpful assistant that answers questions using ONLY the user's saved content below.
+const CHAT_PROMPT = (context: string) => `You are MindSpace, answering questions using ONLY the user's saved content below.
 If the answer isn't in the context, say "I don't have that information in your saves."
 Cite sources by referencing the item titles/URLs.
 
@@ -97,10 +96,6 @@ const embeddingModel = genAI.getGenerativeModel({
 // Core AI Functions
 // ============================================
 
-/**
- * Generate embedding for semantic search
- * 768 dimensions, normalized
- */
 export async function generateEmbedding(text: string): Promise<Float32Array> {
   try {
     const result = await embeddingModel.embedContent(text);
@@ -112,10 +107,6 @@ export async function generateEmbedding(text: string): Promise<Float32Array> {
   }
 }
 
-/**
- * Process a saved item: summarize, tag, extract entities
- * Single API call for efficiency
- */
 export interface ProcessedItem {
   summary: string;
   tags: string[];
@@ -129,7 +120,6 @@ export async function processItem(
   userNote: string | null,
   mediaContext?: string
 ): Promise<ProcessedItem> {
-  // Build context for the model
   const contextParts = [
     `Platform: ${platform}`,
     `URL: ${url}`,
@@ -156,19 +146,18 @@ Return ONLY a JSON object with keys: summary (string), tags (string[]), entities
     const result = await flashModel.generateContent(prompt);
     const response = result.response.text();
 
-    // Parse JSON from response (handle potential markdown code blocks)
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     const jsonStr = jsonMatch ? jsonMatch[0] : response;
     const parsed = JSON.parse(jsonStr);
 
+    const tags = Array.isArray(parsed.tags) ? (parsed.tags as unknown[]).filter((t): t is string => typeof t === 'string') : [];
     return {
       summary: parsed.summary?.trim() ?? '',
-      tags: Array.isArray(parsed.tags) ? parsed.tags.filter(t => typeof t === 'string') : [],
+      tags,
       entities: parsed.entities ?? {},
     };
   } catch (error) {
     console.error('[Gemini] Process item failed:', error);
-    // Return minimal fallback
     return {
       summary: userNote?.slice(0, 200) ?? 'Saved from ' + platform,
       tags: [platform, 'saved'],
@@ -177,9 +166,6 @@ Return ONLY a JSON object with keys: summary (string), tags (string[]), entities
   }
 }
 
-/**
- * Chat with user's saves (RAG)
- */
 export interface ChatResult {
   answer: string;
   citations: Array<{
@@ -196,7 +182,6 @@ export async function chatWithSaves(
   items: SavedItem[],
   maxContextItems = 10
 ): Promise<ChatResult> {
-  // Build context from top items
   const contextItems = items.slice(0, maxContextItems);
   const context = contextItems
     .map((item, i) => `
@@ -212,7 +197,6 @@ Tags: ${item.tags.join(', ')}
     const result = await flashModel.generateContent(prompt);
     const answer = result.response.text().trim();
 
-    // Simple citation extraction: find which items were referenced
     const citations = contextItems
       .filter(item => answer.toLowerCase().includes(item.title?.toLowerCase().slice(0, 20) ?? ''))
       .map((item, i) => ({
@@ -233,9 +217,6 @@ Tags: ${item.tags.join(', ')}
   }
 }
 
-/**
- * Generate clusters from items (for periodic batch job)
- */
 export interface Cluster {
   id: string;
   label: string;
@@ -247,7 +228,6 @@ export interface Cluster {
 export async function generateClusters(items: SavedItem[]): Promise<Cluster[]> {
   if (items.length < 5) return [];
 
-  // Sample items for clustering (max 100 to fit context)
   const sample = items.slice(0, 100);
   const context = sample
     .map(item => `${item.id}|${item.title || ''}|${item.summary || item.userNote || ''}|${item.tags.join(',')}`)
@@ -255,7 +235,7 @@ export async function generateClusters(items: SavedItem[]): Promise<Cluster[]> {
 
   const prompt = `
 Analyze these saved items and group them into 5-10 thematic clusters.
-Each item: ID | Title | Summary | Tags
+Each line: ID | Title | Summary | Tags
 
 ${context}
 
@@ -283,15 +263,11 @@ Return ONLY a JSON array of clusters:
   }
 }
 
-// ============================================
-// Utility: Count Tokens (for monitoring usage)
-// ============================================
-
 export async function countTokens(text: string): Promise<number> {
   try {
     const result = await flashModel.countTokens(text);
     return result.totalTokens;
   } catch {
-    return Math.ceil(text.length / 4); // Rough estimate
+    return Math.ceil(text.length / 4);
   }
 }

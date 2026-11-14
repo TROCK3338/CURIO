@@ -4,7 +4,7 @@
  * Works in serverless (no puppeteer/playwright - too heavy)
  */
 
-import type { Platform, ExtractedEntities } from '@mindspace/shared';
+import type { Platform, ExtractedEntities } from './types';
 
 // ============================================
 // Platform Detection & URL Parsing
@@ -152,18 +152,16 @@ export async function fetchMetaTags(url: string): Promise<MetaTags | null> {
     if (!response.ok) return null;
     const html = await response.text();
 
-    // Parse meta tags with regex (lightweight, no DOM parser)
     const meta: MetaTags = {};
     const metaRegex = /<meta\s+(?:property|name)=["']([^"']+)["']\s+content=["']([^"']*)["']/gi;
     let match;
     while ((match = metaRegex.exec(html)) !== null) {
       const [, key, value] = match;
       if (key.startsWith('og:') || key.startsWith('twitter:') || key === 'description' || key === 'author') {
-        meta[key] = value;
+        (meta as Record<string, string | string[] | undefined>)[key] = value;
       }
     }
 
-    // Also check for JSON-LD structured data
     const jsonLdRegex = /<script\s+type=["']application\/ld\+json["']>([\s\S]*?)<\/script>/gi;
     while ((match = jsonLdRegex.exec(html)) !== null) {
       try {
@@ -179,14 +177,13 @@ export async function fetchMetaTags(url: string): Promise<MetaTags | null> {
       } catch {}
     }
 
-    // Map common OG tags to friendly names
     return {
-      title: meta['og:title'] || meta['twitter:title'] || meta.title,
-      description: meta['og:description'] || meta['twitter:description'] || meta.description,
-      image: meta['og:image'] || meta['twitter:image'] || meta.image,
-      video: meta['og:video'] || meta['twitter:player:stream'] || meta.video,
-      author: meta['og:site_name'] || meta.author,
-      publishedTime: meta['article:published_time'] || meta.publishedTime,
+      title: (meta['og:title'] || meta['twitter:title'] || meta.title) as string | undefined,
+      description: (meta['og:description'] || meta['twitter:description'] || meta.description) as string | undefined,
+      image: (meta['og:image'] || meta['twitter:image'] || meta.image) as string | undefined,
+      video: (meta['og:video'] || meta['twitter:player:stream'] || meta.video) as string | undefined,
+      author: (meta['og:site_name'] || meta.author) as string | undefined,
+      publishedTime: (meta['article:published_time'] || meta.publishedTime) as string | undefined,
       tags: meta['og:tag'] ? (Array.isArray(meta['og:tag']) ? meta['og:tag'] : [meta['og:tag']]) : [],
     };
   } catch {
@@ -213,7 +210,6 @@ export interface EnrichedMetadata {
 export async function enrichUrl(url: string, platform: Platform): Promise<EnrichedMetadata> {
   const result: EnrichedMetadata = {};
 
-  // 1. Try oEmbed (fast, official)
   const oembed = await tryOEmbed(url);
   if (oembed) {
     result.title = oembed.title;
@@ -221,7 +217,6 @@ export async function enrichUrl(url: string, platform: Platform): Promise<Enrich
     result.thumbnailUrl = oembed.thumbnail_url;
   }
 
-  // 2. Try meta tag scraping (works for many platforms)
   const meta = await fetchMetaTags(url);
   if (meta) {
     result.title = result.title || meta.title;
@@ -233,16 +228,11 @@ export async function enrichUrl(url: string, platform: Platform): Promise<Enrich
     result.tags = meta.tags;
   }
 
-  // 3. Platform-specific enhancements
   switch (platform) {
     case 'instagram':
-      // Instagram oEmbed requires Facebook App - skip for now
-      // Meta tags often have og:video for reels
       break;
     case 'youtube':
-      // YouTube oEmbed works well
       if (result.mediaUrl && !result.mediaUrl.includes('youtube.com')) {
-        // Extract actual video ID for direct embed
         const videoId = extractShortcode(url, 'youtube');
         if (videoId) {
           result.mediaUrl = `https://www.youtube.com/embed/${videoId}`;
@@ -250,10 +240,8 @@ export async function enrichUrl(url: string, platform: Platform): Promise<Enrich
       }
       break;
     case 'tiktok':
-      // TikTok oEmbed returns embed HTML with video
       break;
     case 'x':
-      // Twitter/X oEmbed works
       break;
   }
 
@@ -274,7 +262,6 @@ export function quickEntityExtraction(text: string): ExtractedEntities {
   const lower = text.toLowerCase();
   const entities: ExtractedEntities = {};
 
-  // Recipe detection
   if (RECIPE_KEYWORDS.some(k => lower.includes(k))) {
     entities.recipe = {
       name: 'Detected recipe',
@@ -283,7 +270,6 @@ export function quickEntityExtraction(text: string): ExtractedEntities {
     };
   }
 
-  // Workout detection
   if (WORKOUT_KEYWORDS.some(k => lower.includes(k))) {
     entities.workout = {
       name: 'Detected workout',
@@ -292,7 +278,6 @@ export function quickEntityExtraction(text: string): ExtractedEntities {
     };
   }
 
-  // Product detection
   if (PRODUCT_KEYWORDS.some(k => lower.includes(k))) {
     entities.product = {
       name: 'Detected product',
@@ -300,14 +285,12 @@ export function quickEntityExtraction(text: string): ExtractedEntities {
     };
   }
 
-  // Place detection (very basic)
   if (PLACE_KEYWORDS.some(k => lower.includes(k))) {
     entities.place = {
       name: 'Detected place',
     };
   }
 
-  // Event detection
   if (EVENT_KEYWORDS.some(k => lower.includes(k))) {
     entities.event = {
       name: 'Detected event',
@@ -333,4 +316,44 @@ function extractDuration(text: string): string | undefined {
 function extractPrice(text: string): string | undefined {
   const match = text.match(/[$€£]\s?(\d+(?:[.,]\d+)?)/);
   return match ? match[0] : undefined;
+}
+
+export function detectPlatform(url: string): Platform {
+  try {
+    const hostname = new URL(url).hostname.replace('www.', '');
+    if (hostname.includes('instagram.com')) return 'instagram';
+    if (hostname.includes('tiktok.com')) return 'tiktok';
+    if (hostname.includes('x.com') || hostname.includes('twitter.com')) return 'x';
+    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) return 'youtube';
+    if (hostname.includes('reddit.com')) return 'reddit';
+    if (hostname.includes('pinterest.com')) return 'pinterest';
+    if (hostname.includes('linkedin.com')) return 'linkedin';
+    if (hostname.includes('threads.net')) return 'threads';
+    if (hostname.includes('bsky.app')) return 'bluesky';
+    return 'generic';
+  } catch {
+    return 'generic';
+  }
+}
+
+export function extractUsername(url: string, platform: Platform): string | null {
+  try {
+    const pathname = new URL(url).pathname;
+    const patterns: Record<Platform, RegExp> = {
+      instagram: /^\/@?([^/]+)\//,
+      tiktok: /^\/@?([^/]+)\//,
+      x: /^\/@?([^/]+)\//,
+      youtube: /^\/(?:@|c\/|user\/)?([^/]+)/,
+      reddit: /^\/user\/([^/]+)/,
+      pinterest: /^\/@?([^/]+)\//,
+      linkedin: /^\/in\/([^/]+)/,
+      threads: /^\/@?([^/]+)\//,
+      bluesky: /^\/profile\/([^/]+)/,
+      generic: /^\/?([^/]+)/,
+    };
+    const match = pathname.match(patterns[platform]);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
 }

@@ -4,16 +4,10 @@
  */
 
 export const PROMPTS = {
-  /**
-   * System prompt for all Gemini interactions
-   */
   SYSTEM: `You are MindSpace, an AI that helps users organize and retrieve their saved content.
 You process content from social media (Instagram, TikTok, X, YouTube, etc.) and the web.
 Be concise, accurate, and helpful. Never hallucinate. If unsure, say so.`,
 
-  /**
-   * Summarization prompt
-   */
   SUMMARIZE: (context: string) => `
 ${context}
 
@@ -23,9 +17,6 @@ Focus on: what is this about, why might someone save it, what's actionable or me
 Be specific, not generic. No fluff.
 Return ONLY the summary text.`,
 
-  /**
-   * Tagging prompt
-   */
   TAG: (context: string) => `
 ${context}
 
@@ -39,9 +30,6 @@ Also include platform tags: ["instagram", "tiktok", "x", "youtube", "reels", "sh
 
 Return ONLY a JSON array. Example: ["design", "ui", "inspiration", "instagram", "reels"]`,
 
-  /**
-   * Entity extraction prompt
-   */
   ENTITIES: (context: string) => `
 ${context}
 
@@ -57,9 +45,6 @@ Extract structured entities. Return ONLY valid JSON:
 
 Only include entities clearly present. Omit empty ones.`,
 
-  /**
-   * Combined processing prompt (single call for efficiency)
-   */
   PROCESS_ITEM: (context: string) => `
 ${context}
 
@@ -76,9 +61,6 @@ Return ONLY JSON:
   "entities": { "recipe": {...}, "product": {...} }
 }`,
 
-  /**
-   * Chat/RAG prompt
-   */
   CHAT: (context: string, question: string) => `
 You are MindSpace, answering questions using ONLY the user's saved content below.
 If the answer isn't in the context, say "I don't have that information in your saves."
@@ -91,9 +73,6 @@ QUESTION: ${question}
 
 ANSWER:`,
 
-  /**
-   * Clustering prompt
-   */
   CLUSTER: (itemsContext: string) => `
 Analyze these saved items and group them into 5-10 thematic clusters.
 Each line: ID | Title | Summary | Tags
@@ -111,10 +90,6 @@ Return ONLY a JSON array:
   }
 ]`,
 };
-
-// ============================================
-// User-Customizable Prompts (stored in settings)
-// ============================================
 
 export const DEFAULT_CUSTOM_PROMPTS = {
   tagPrompt: '',

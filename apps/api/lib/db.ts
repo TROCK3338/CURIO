@@ -3,12 +3,14 @@
  * HTTP-based, works great in Vercel Edge Functions
  */
 
-import { createClient, type LibSQLDatabase } from '@libsql/client';
-import type { SavedItem, ExtractedEntities } from '@mindspace/shared';
+import { createClient } from '@libsql/client';
+import type { SavedItem, ExtractedEntities } from './types';
 
 // ============================================
 // Client Setup
 // ============================================
+
+type LibSQLDatabase = ReturnType<typeof createClient>;
 
 let db: LibSQLDatabase | null = null;
 
@@ -67,7 +69,6 @@ export async function initializeSchema(): Promise<void> {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_items_enrichment ON items(enrichment_status);`);
 
   // Vector search virtual table (sqlite-vec)
-  // Note: Requires sqlite-vec extension loaded. In Turso, this is available.
   try {
     await db.execute(`
       CREATE VIRTUAL TABLE IF NOT EXISTS items_vec USING vec0(
@@ -114,7 +115,7 @@ export async function insertItem(item: SavedItem): Promise<void> {
       item.summary,
       JSON.stringify(item.tags),
       JSON.stringify(item.entities),
-      item.embedding ? new Float32Array(item.embedding).buffer : null,
+      item.embedding ? Buffer.from(new Float32Array(item.embedding).buffer) : null,
       item.mediaUrl,
       item.thumbnailUrl,
       item.authorUsername,
@@ -127,12 +128,11 @@ export async function insertItem(item: SavedItem): Promise<void> {
     ],
   });
 
-  // Also insert into vector table if embedding exists
   if (item.embedding) {
     try {
       await db.execute({
         sql: `INSERT INTO items_vec (rowid, embedding) VALUES (?, ?)`,
-        args: [item.id, new Float32Array(item.embedding).buffer],
+        args: [item.id, Buffer.from(new Float32Array(item.embedding).buffer)],
       });
     } catch (e) {
       console.warn('[DB] Vector insert failed:', e);
@@ -177,7 +177,7 @@ export async function upsertItem(item: SavedItem): Promise<void> {
       item.summary,
       JSON.stringify(item.tags),
       JSON.stringify(item.entities),
-      item.embedding ? new Float32Array(item.embedding).buffer : null,
+      item.embedding ? Buffer.from(new Float32Array(item.embedding).buffer) : null,
       item.mediaUrl,
       item.thumbnailUrl,
       item.authorUsername,
@@ -195,7 +195,7 @@ export async function upsertItem(item: SavedItem): Promise<void> {
       await db.execute({
         sql: `INSERT INTO items_vec (rowid, embedding) VALUES (?, ?)
               ON CONFLICT(rowid) DO UPDATE SET embedding = excluded.embedding`,
-        args: [item.id, new Float32Array(item.embedding).buffer],
+        args: [item.id, Buffer.from(new Float32Array(item.embedding).buffer)],
       });
     } catch (e) {
       console.warn('[DB] Vector upsert failed:', e);
@@ -245,17 +245,10 @@ export async function searchItems(
 ): Promise<{ items: SavedItem[]; total: number }> {
   const db = getDb();
 
-  // Build WHERE clause
   const conditions: string[] = [];
   const args: (string | number)[] = [];
 
-  // Semantic search via vector similarity (if query provided and vec table exists)
-  let useVectorSearch = false;
-  let queryEmbedding: Float32Array | null = null;
-
   if (query.trim()) {
-    // We'll generate embedding in the caller and pass it here if needed
-    // For now, fall back to keyword search
     conditions.push(`(
       title LIKE ? OR
       user_note LIKE ? OR
@@ -274,7 +267,6 @@ export async function searchItems(
   }
 
   if (filters.tags && filters.tags.length > 0) {
-    // JSON1: check if any tag matches
     const tagConditions = filters.tags.map(() => `JSON_EXTRACT(tags, '$') LIKE ?`).join(' OR ');
     conditions.push(`(${tagConditions})`);
     filters.tags.forEach(tag => args.push(`%${tag}%`));
@@ -297,14 +289,12 @@ export async function searchItems(
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // Count total
   const countResult = await db.execute({
     sql: `SELECT COUNT(*) as total FROM items ${whereClause}`,
     args,
   });
   const total = Number(countResult.rows[0]?.total ?? 0);
 
-  // Fetch items
   const itemsResult = await db.execute({
     sql: `
       SELECT * FROM items
@@ -327,7 +317,6 @@ export async function semanticSearch(
 ): Promise<{ items: SavedItem[]; total: number }> {
   const db = getDb();
 
-  // Build filter conditions for the main table join
   const conditions: string[] = [];
   const args: (string | number)[] = [];
 
@@ -349,8 +338,6 @@ export async function semanticSearch(
   const whereClause = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
 
   try {
-    // Vector search with join to main table
-    const vectorArgs = [new Float32Array(queryEmbedding).buffer, limit + offset];
     const result = await db.execute({
       sql: `
         SELECT
@@ -362,12 +349,11 @@ export async function semanticSearch(
         ORDER BY distance ASC
         LIMIT ? OFFSET ?
       `,
-      args: [new Float32Array(queryEmbedding).buffer, ...args, limit, offset],
+      args: [Buffer.from(queryEmbedding.buffer), ...args, limit, offset],
     });
 
     const items = result.rows.map(rowToItem);
 
-    // Get total count (approximate for vector search)
     const countResult = await db.execute({
       sql: `SELECT COUNT(*) as total FROM items WHERE 1=1 ${whereClause}`,
       args,
@@ -377,7 +363,6 @@ export async function semanticSearch(
     return { items, total };
   } catch (e) {
     console.warn('[DB] Vector search failed, falling back to keyword:', e);
-    // Fallback: use first few words as keyword search
     return searchItems('', filters, limit, offset);
   }
 }
@@ -392,7 +377,7 @@ export interface ClusterRow {
   description: string;
   item_count: number;
   tags: string;
-  representative_items: string; // JSON
+  representative_items: string;
   generated_at: string;
 }
 
@@ -427,6 +412,7 @@ export async function getLatestClusters(): Promise<ClusterRow[]> {
   const db = getDb();
   const result = await db.execute({
     sql: `SELECT * FROM clusters ORDER BY generated_at DESC LIMIT 20`,
+    args: [],
   });
   return result.rows as unknown as ClusterRow[];
 }
@@ -441,7 +427,8 @@ export async function getSetting(key: string): Promise<string | null> {
     sql: `SELECT value FROM settings WHERE key = ?`,
     args: [key],
   });
-  return result.rows[0]?.value ?? null;
+  const val = result.rows[0]?.value;
+return val != null ? String(val) : null;
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
@@ -466,7 +453,7 @@ function rowToItem(row: Record<string, unknown>): SavedItem {
     summary: row.summary as string | null,
     tags: row.tags ? JSON.parse(row.tags as string) : [],
     entities: row.entities ? JSON.parse(row.entities as string) : {},
-    embedding: row.embedding ? new Float32Array(row.embedding as ArrayBuffer).slice() : null,
+    embedding: row.embedding ? Array.from(new Float32Array(row.embedding as ArrayBuffer)) : null,
     mediaUrl: row.media_url as string | null,
     thumbnailUrl: row.thumbnail_url as string | null,
     authorUsername: row.author_username as string | null,
