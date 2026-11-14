@@ -4,6 +4,7 @@
   "installCommand": "npm install",
   "framework": "vite",
   "regions": ["iad1"],
+  "outputDirectory": "apps/web/dist",
   "routes": [
     {
       "src": "/api/(.*)",
