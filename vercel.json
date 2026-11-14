@@ -11,10 +11,6 @@
       "dest": "/apps/api/$1"
     },
     {
-      "src": "/share-target",
-      "dest": "/index.html"
-    },
-    {
       "src": "/(.*)",
       "dest": "/apps/web/dist/$1"
     }
@@ -50,12 +46,6 @@
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
         { "key": "Service-Worker-Allowed", "value": "/" }
       ]
-    }
-  ],
-  "rewrites": [
-    {
-      "source": "/share-target",
-      "destination": "/share-target"
     }
   ]
 }
