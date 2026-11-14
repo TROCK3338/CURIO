@@ -4,11 +4,6 @@
   "installCommand": "npm install",
   "framework": "vite",
   "regions": ["iad1"],
-  "functions": {
-    "apps/api/*.ts": {
-      "maxDuration": 30
-    }
-  },
   "routes": [
     {
       "src": "/api/(.*)",
