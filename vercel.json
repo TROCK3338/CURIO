@@ -11,6 +11,10 @@
       "dest": "/apps/api/$1"
     },
     {
+      "src": "/share-target",
+      "dest": "/index.html"
+    },
+    {
       "src": "/(.*)",
       "dest": "/apps/web/dist/$1"
     }
