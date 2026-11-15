@@ -35,9 +35,6 @@ export function getDb(): LibSQLDatabase {
 export async function initializeSchema(): Promise<void> {
   const db = getDb();
 
-  // Enable JSON1 extension (built into libSQL)
-  await db.execute('PRAGMA enable_json1 = true;');
-
   // Main items table
   await db.execute(`
     CREATE TABLE IF NOT EXISTS items (
