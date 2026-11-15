@@ -51,26 +51,33 @@ export function DropdownMenuTrigger({ children, className, asChild = false, onCl
   const context = useContext(DropdownMenuContext);
   if (!context) throw new Error('DropdownMenuTrigger must be used within DropdownMenu');
 
-  const Component = asChild ? Slot : 'button';
+  const triggerProps = {
+    ref: context.triggerRef,
+    onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+      onClick?.(event);
+      if (!event.defaultPrevented) context.onToggle();
+    },
+    className: cn(
+      'inline-flex items-center gap-1.5 rounded-md bg-background px-3 py-2 text-sm font-medium',
+      'ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      'disabled:pointer-events-none disabled:opacity-50',
+      'hover:bg-accent hover:text-accent-foreground',
+      className
+    ),
+    ...props,
+  };
+
+  // Slot must receive exactly one element. Keeping the normal-trigger chevron
+  // out of this branch avoids passing a false sibling to Radix when asChild.
+  if (asChild) {
+    return <Slot {...triggerProps}>{children}</Slot>;
+  }
+
   return (
-    <Component
-      ref={context.triggerRef}
-      onClick={event => {
-        onClick?.(event as React.MouseEvent<HTMLButtonElement>);
-        if (!event.defaultPrevented) context.onToggle();
-      }}
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-md bg-background px-3 py-2 text-sm font-medium',
-        'ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        'disabled:pointer-events-none disabled:opacity-50',
-        'hover:bg-accent hover:text-accent-foreground',
-        className
-      )}
-      {...props}
-    >
+    <button {...triggerProps}>
       {children}
-      {!asChild && <ChevronDown className={cn('h-4 w-4 transition-transform', context.open && 'rotate-180')} />}
-    </Component>
+      <ChevronDown className={cn('h-4 w-4 transition-transform', context.open && 'rotate-180')} />
+    </button>
   );
 }
 
