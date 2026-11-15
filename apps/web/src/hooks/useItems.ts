@@ -3,6 +3,7 @@
  * Handles caching, synchronization, and optimistic updates
  */
 
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient, UseQueryOptions } from '@tanstack/react-query';
 import { searchItems, chatWithSaves, getClusters, regenerateClusters, ingestItem } from '../services/api';
 import { getItemsLocally, saveItemLocally, searchItemsLocally } from '../services/indexeddb';
@@ -183,15 +184,22 @@ export function useLocalItems(limit = 50, offset = 0) {
 export function useHybridItems(params: SearchParams = {}) {
   const onlineQuery = useSearch(params);
   const localQuery = useLocalSearch(params.q || '', params.limit || 20);
+  const cachedQuery = useLocalItems(params.limit || 50, params.offset || 0);
 
-  // Merge results (online takes precedence, local fills gaps)
-  const mergedItems = onlineQuery.data?.items || localQuery.data || [];
-  const isLoading = onlineQuery.isLoading || localQuery.isLoading;
-  const isError = onlineQuery.isError && localQuery.isError;
+  useEffect(() => {
+    if (onlineQuery.data?.items?.length) {
+      void Promise.all(onlineQuery.data.items.map(item => saveItemLocally(item)));
+    }
+  }, [onlineQuery.data]);
+
+  // Prefer live server results; show cached items when the API is unavailable.
+  const mergedItems = onlineQuery.data?.items ?? (params.q ? localQuery.data : cachedQuery.data) ?? [];
+  const isLoading = onlineQuery.isLoading;
+  const isError = onlineQuery.isError && mergedItems.length === 0;
 
   return {
     items: mergedItems,
-    total: onlineQuery.data?.total || mergedItems.length,
+    total: onlineQuery.data?.total ?? mergedItems.length,
     hasMore: onlineQuery.data?.hasMore || false,
     isLoading,
     isError,

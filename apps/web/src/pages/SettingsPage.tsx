@@ -26,7 +26,7 @@ export function SettingsPage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">Customize your MindSpace experience</p>
+        <p className="text-muted-foreground">Customize your CURIO experience</p>
       </div>
 
       {/* Tabs */}
@@ -422,7 +422,7 @@ function AboutSettings({ reset }: { reset: () => void }) {
             <Brain className="h-8 w-8 text-primary" />
           </div>
           <div>
-            <h3 className="font-bold text-lg">MindSpace</h3>
+            <h3 className="font-bold text-lg">CURIO</h3>
             <p className="text-sm text-muted-foreground">Version 0.1.0</p>
             <p className="text-sm text-muted-foreground mt-1">Your personal AI-powered mind space</p>
           </div>

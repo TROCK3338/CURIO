@@ -1,7 +1,7 @@
 {
-  "name": "MindSpace",
-  "short_name": "MindSpace",
-  "description": "Your personal mind space - save, organize, and retrieve anything with AI",
+  "name": "CURIO",
+  "short_name": "CURIO",
+  "description": "Your personal journal for links, Reels, and ideas",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",
@@ -77,18 +77,11 @@
   ],
   "share_target": {
     "action": "/share-target",
-    "method": "POST",
-    "enctype": "multipart/form-data",
+    "method": "GET",
     "params": {
       "title": "title",
       "text": "text",
-      "url": "url",
-      "files": [
-        {
-          "name": "media",
-          "accept": ["image/*", "video/*"]
-        }
-      ]
+      "url": "url"
     }
   },
   "prefer_related_applications": false

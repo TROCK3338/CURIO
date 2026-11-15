@@ -12,12 +12,11 @@ import { Skeleton, ItemSkeleton } from '../components/ui/Skeleton';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '../components/ui/DropdownMenu';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '../utils/cn';
-import { useSuccessToast, useErrorToast } from '../components/ui/Toast';
+import { useSuccessToast } from '../components/ui/Toast';
 
 export function HomePage() {
   const { settings } = useSettings();
   const successToast = useSuccessToast();
-  const errorToast = useErrorToast();
 
   // Fetch items
   const { items, isLoading, isError, refetch, hasMore } = useHybridItems({ limit: settings.itemsPerPage });
@@ -41,7 +40,7 @@ export function HomePage() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">MindSpace</h1>
+            <h1 className="text-2xl font-bold">CURIO</h1>
             <p className="text-muted-foreground">Your personal mind space</p>
           </div>
         </div>
@@ -68,14 +67,11 @@ export function HomePage() {
         <Brain className="h-16 w-16 text-muted-foreground/30 mb-4" />
         <h2 className="text-2xl font-semibold">Your mind space is empty</h2>
         <p className="text-muted-foreground mt-2 max-w-xs">
-          Share anything from Instagram, TikTok, X, Safari, or any app to MindSpace.
-          It'll appear here, organized and searchable.
+          Save a public Reel or video link here. CURIO keeps the link so you can return to it later.
         </p>
         <div className="mt-6 flex gap-3">
-          <Button variant="outline" onClick={() => navigator.share?.({ text: 'Test share' }).catch(() => {})}>
-            Try Share Sheet
-          </Button>
-          <Button variant="ghost">Open Settings</Button>
+          <Button asChild variant="outline"><Link to="/share-target"><Plus className="h-4 w-4 mr-2" />Save a link</Link></Button>
+          <Button asChild variant="ghost"><Link to="/settings">Open Settings</Link></Button>
         </div>
       </div>
     );
@@ -86,7 +82,7 @@ export function HomePage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">MindSpace</h1>
+          <h1 className="text-2xl font-bold">CURIO</h1>
           <p className="text-muted-foreground">
             {stats.total} saves • {stats.platforms} platforms • {stats.thisWeek} this week
           </p>
@@ -156,16 +152,11 @@ export function HomePage() {
 
 function ItemCard({ item, viewMode }: { item: any; viewMode: 'timeline' | 'grid' }) {
   const successToast = useSuccessToast();
-  const errorToast = useErrorToast();
 
   const handleOpen = () => window.open(item.url, '_blank', 'noopener,noreferrer');
   const handleCopy = () => {
     navigator.clipboard.writeText(item.url);
     successToast('Link copied');
-  };
-  const handleDelete = async () => {
-    // Would call delete API
-    errorToast('Delete not implemented yet');
   };
 
   const content = (
@@ -194,7 +185,7 @@ function ItemCard({ item, viewMode }: { item: any; viewMode: 'timeline' | 'grid'
               'font-medium line-clamp-2 group-hover:text-primary transition-colors',
               viewMode === 'grid' ? 'text-lg' : 'text-base'
             )}>
-              {item.title || 'Untitled'}
+              <Link to={`/item/${item.id}`}>{item.title || 'Untitled'}</Link>
             </h3>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -206,7 +197,6 @@ function ItemCard({ item, viewMode }: { item: any; viewMode: 'timeline' | 'grid'
                 <DropdownMenuItem onClick={handleOpen}><svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>Open</DropdownMenuItem>
                 <DropdownMenuItem onClick={handleCopy}><svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>Copy Link</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleDelete} className="text-destructive"><svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>Delete</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

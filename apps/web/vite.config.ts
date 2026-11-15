@@ -13,9 +13,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
-        name: 'MindSpace',
-        short_name: 'MindSpace',
-        description: 'Your personal mind space - save, organize, and retrieve anything with AI',
+        name: 'CURIO',
+        short_name: 'CURIO',
+        description: 'Your personal journal for links, Reels, and ideas',
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',
@@ -90,21 +90,15 @@ export default defineConfig({
             icons: [{ src: '/icons/chat-icon.png', sizes: '192x192' }]
           }
         ],
-        // Web Share Target API - enables appearing in native share sheet
+        // GET is handled by ShareTargetPage. iOS currently ignores share_target;
+        // supported browsers can pass URL/text without a custom POST worker.
         share_target: {
           action: '/share-target',
-          method: 'POST',
-          enctype: 'multipart/form-data',
+          method: 'GET',
           params: {
             title: 'title',
             text: 'text',
             url: 'url',
-            files: [
-              {
-                name: 'media',
-                accept: ['image/*', 'video/*']
-              }
-            ]
           }
         },
         prefer_related_applications: false,

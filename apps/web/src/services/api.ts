@@ -121,10 +121,6 @@ export async function getItem(id: string): Promise<SavedItem | null> {
   }
 }
 
-export async function deleteItem(id: string): Promise<void> {
-  await fetch(`${API_BASE}/items/${id}`, { method: 'DELETE' });
-}
-
 /* ============================================
    Health Check
    ============================================ */

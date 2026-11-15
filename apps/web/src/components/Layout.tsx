@@ -64,7 +64,7 @@ export function Layout() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Sparkles className="h-5 w-5" />
             </div>
-            <span className="font-semibold text-lg">MindSpace</span>
+            <span className="font-semibold text-lg">CURIO</span>
           </div>
 
           {/* Navigation */}
@@ -118,7 +118,7 @@ export function Layout() {
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
             <Menu className="h-6 w-6" />
           </Button>
-          <div className="flex-1 font-semibold">MindSpace</div>
+          <div className="flex-1 font-semibold">CURIO</div>
           <Button variant="ghost" size="icon" onClick={() => setCommandPaletteOpen(true)} aria-label="Search">
             <Search className="h-5 w-5" />
           </Button>

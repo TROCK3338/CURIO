@@ -63,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (semantic && q.trim()) {
       const queryEmbedding = await generateEmbedding(q);
-      result = await semanticSearch(queryEmbedding, filters, limit, offset);
+      result = await semanticSearch(queryEmbedding, filters, limit, offset, q);
     } else {
       result = await searchItems(q, filters, limit, offset);
     }

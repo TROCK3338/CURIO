@@ -87,6 +87,18 @@ export async function initializeSchema(): Promise<void> {
       value TEXT NOT NULL
     );
   `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS clusters (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      description TEXT NOT NULL,
+      item_count INTEGER NOT NULL DEFAULT 0,
+      tags TEXT NOT NULL DEFAULT '[]',
+      representative_items TEXT NOT NULL DEFAULT '[]',
+      generated_at TEXT NOT NULL
+    );
+  `);
 }
 
 // ============================================
@@ -130,9 +142,11 @@ export async function insertItem(item: SavedItem): Promise<void> {
 
   if (item.embedding) {
     try {
+      const row = await db.execute({ sql: 'SELECT rowid FROM items WHERE id = ?', args: [item.id] });
+      const rowId = Number(row.rows[0]?.rowid);
       await db.execute({
         sql: `INSERT INTO items_vec (rowid, embedding) VALUES (?, ?)`,
-        args: [item.id, Buffer.from(new Float32Array(item.embedding).buffer)],
+        args: [rowId, Buffer.from(new Float32Array(item.embedding).buffer)],
       });
     } catch (e) {
       console.warn('[DB] Vector insert failed:', e);
@@ -192,10 +206,12 @@ export async function upsertItem(item: SavedItem): Promise<void> {
 
   if (item.embedding) {
     try {
+      const row = await db.execute({ sql: 'SELECT rowid FROM items WHERE id = ?', args: [item.id] });
+      const rowId = Number(row.rows[0]?.rowid);
       await db.execute({
         sql: `INSERT INTO items_vec (rowid, embedding) VALUES (?, ?)
               ON CONFLICT(rowid) DO UPDATE SET embedding = excluded.embedding`,
-        args: [item.id, Buffer.from(new Float32Array(item.embedding).buffer)],
+        args: [rowId, Buffer.from(new Float32Array(item.embedding).buffer)],
       });
     } catch (e) {
       console.warn('[DB] Vector upsert failed:', e);
@@ -212,6 +228,29 @@ export async function getItem(id: string): Promise<SavedItem | null> {
 
   if (result.rows.length === 0) return null;
   return rowToItem(result.rows[0]);
+}
+
+export function rowToItem(row: Record<string, unknown>): SavedItem {
+  return {
+    id: String(row.id),
+    url: String(row.url),
+    platform: row.platform as SavedItem['platform'],
+    title: row.title as string | null,
+    userNote: row.user_note as string | null,
+    summary: row.summary as string | null,
+    tags: row.tags ? JSON.parse(String(row.tags)) : [],
+    entities: row.entities ? JSON.parse(String(row.entities)) : {},
+    embedding: row.embedding ? Array.from(new Float32Array(row.embedding as ArrayBuffer)) : null,
+    mediaUrl: row.media_url as string | null,
+    thumbnailUrl: row.thumbnail_url as string | null,
+    authorUsername: row.author_username as string | null,
+    authorDisplayName: row.author_display_name as string | null,
+    publishedAt: row.published_at as string | null,
+    savedAt: String(row.saved_at),
+    updatedAt: String(row.updated_at),
+    enrichmentStatus: row.enrichment_status as SavedItem['enrichmentStatus'],
+    enrichmentError: row.enrichment_error as string | null,
+  };
 }
 
 export async function getItemByUrl(url: string): Promise<SavedItem | null> {
@@ -313,7 +352,8 @@ export async function semanticSearch(
   queryEmbedding: Float32Array,
   filters: SearchFilters = {},
   limit = 20,
-  offset = 0
+  offset = 0,
+  fallbackQuery = ''
 ): Promise<{ items: SavedItem[]; total: number }> {
   const db = getDb();
 
@@ -344,7 +384,7 @@ export async function semanticSearch(
           i.*,
           vec_distance_cosine(v.embedding, ?) as distance
         FROM items_vec v
-        JOIN items i ON i.id = v.rowid
+        JOIN items i ON i.rowid = v.rowid
         WHERE 1=1 ${whereClause}
         ORDER BY distance ASC
         LIMIT ? OFFSET ?
@@ -353,9 +393,12 @@ export async function semanticSearch(
     });
 
     const items = result.rows.map(rowToItem);
+    if (items.length === 0 && fallbackQuery.trim()) {
+      return searchItems(fallbackQuery, filters, limit, offset);
+    }
 
     const countResult = await db.execute({
-      sql: `SELECT COUNT(*) as total FROM items WHERE 1=1 ${whereClause}`,
+      sql: `SELECT COUNT(*) as total FROM items_vec v JOIN items i ON i.rowid = v.rowid WHERE 1=1 ${whereClause}`,
       args,
     });
     const total = Number(countResult.rows[0]?.total ?? 0);
@@ -363,7 +406,7 @@ export async function semanticSearch(
     return { items, total };
   } catch (e) {
     console.warn('[DB] Vector search failed, falling back to keyword:', e);
-    return searchItems('', filters, limit, offset);
+    return searchItems(fallbackQuery, filters, limit, offset);
   }
 }
 
@@ -442,26 +485,3 @@ export async function setSetting(key: string, value: string): Promise<void> {
 // ============================================
 // Helpers
 // ============================================
-
-function rowToItem(row: Record<string, unknown>): SavedItem {
-  return {
-    id: row.id as string,
-    url: row.url as string,
-    platform: row.platform as SavedItem['platform'],
-    title: row.title as string | null,
-    userNote: row.user_note as string | null,
-    summary: row.summary as string | null,
-    tags: row.tags ? JSON.parse(row.tags as string) : [],
-    entities: row.entities ? JSON.parse(row.entities as string) : {},
-    embedding: row.embedding ? Array.from(new Float32Array(row.embedding as ArrayBuffer)) : null,
-    mediaUrl: row.media_url as string | null,
-    thumbnailUrl: row.thumbnail_url as string | null,
-    authorUsername: row.author_username as string | null,
-    authorDisplayName: row.author_display_name as string | null,
-    publishedAt: row.published_at as string | null,
-    savedAt: row.saved_at as string,
-    updatedAt: row.updated_at as string,
-    enrichmentStatus: row.enrichment_status as SavedItem['enrichmentStatus'],
-    enrichmentError: row.enrichment_error as string | null,
-  };
-}

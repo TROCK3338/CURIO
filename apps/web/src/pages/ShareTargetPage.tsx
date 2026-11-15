@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle, Loader2, XCircle, AlertCircle, Share2, Brain, Zap } from 'lucide-react';
-import { addToQueue, parseShareTargetData } from '../services/indexeddb';
+import { addToQueue, parseShareTargetData, saveItemLocally } from '../services/indexeddb';
 import { ingestItem } from '../services/api';
-import { initializeSync, triggerManualSync, getSyncStatus } from '../services/sync';
-import { getSettings } from '../services/indexeddb';
+import { initializeSync } from '../services/sync';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -21,6 +20,59 @@ export function ShareTargetPage() {
   const [state, setState] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [savedItem, setSavedItem] = useState<any>(null);
+  const [manualUrl, setManualUrl] = useState('');
+
+  const saveSharedContent = async (data: { url?: string | null; title?: string | null; text?: string | null }) => {
+    const parsed = parseShareTargetData(data);
+    const candidate = parsed.url || findUrl(parsed.text || '');
+    parsed.url = candidate;
+    if (!parsed.url) throw new Error('No link was received. Use Copy Link in Instagram, then paste the link here.');
+    const normalizedUrl = parsed.url.trim();
+    let validUrl: URL;
+    try { validUrl = new URL(normalizedUrl); } catch { throw new Error('The shared content did not contain a valid link.'); }
+    if (validUrl.protocol !== 'https:' && validUrl.protocol !== 'http:') throw new Error('Only web links can be saved.');
+
+    const payload = { url: validUrl.toString(), title: parsed.title || undefined, text: parsed.text || undefined };
+    if (!navigator.onLine) {
+      await addToQueue(payload);
+      return { queued: true as const };
+    }
+
+    try {
+      const result = await ingestItem(payload);
+      if (!result.success || !result.item) throw new Error(result.error || 'The server did not confirm the save.');
+      await saveItemLocally(result.item);
+      return { queued: false as const, item: result.item };
+    } catch (error) {
+      // Only network failures should be queued. A server/API error must be visible
+      // so we don't tell the user their link was saved when it was rejected.
+      if (error instanceof TypeError) {
+        await addToQueue(payload);
+        return { queued: true as const };
+      }
+      throw error;
+    }
+  };
+
+  const handleManualSave = async () => {
+    setState('processing');
+    try {
+      const outcome = await saveSharedContent({ url: manualUrl });
+      if (outcome.queued) {
+        setState('success');
+        infoToast('Queued for sync', 'Saved offline - will sync when online');
+      } else {
+        setSavedItem(outcome.item);
+        setState('success');
+        successToast('Saved!', `"${outcome.item.title || 'Link'}" added to CURIO`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save';
+      setError(message);
+      setState('error');
+      errorToast('Save failed', message);
+    }
+  };
 
   // Process share data on mount
   useEffect(() => {
@@ -40,37 +92,15 @@ export function ShareTargetPage() {
       setError(null);
 
       try {
-        // Parse share data (handles both GET params and future POST data)
         const shareData = { url, title: title || undefined, text: text || undefined };
-        const parsed = parseShareTargetData(shareData);
-
-        if (!parsed.url) {
-          throw new Error('No URL provided');
-        }
-
-        // Try to save immediately if online
-        const settings = await getSettings();
-        await initializeSync(settings);
-
-        if (navigator.onLine) {
-          const result = await ingestItem({
-            url: parsed.url,
-            title: parsed.title,
-            text: parsed.text,
-          });
-
-          if (result.success && result.item) {
-            setSavedItem(result.item);
-            setState('success');
-            successToast('Saved!', `"${result.item.title || 'Item'}" added to MindSpace`);
-          } else {
-            throw new Error(result.error || 'Save failed');
-          }
-        } else {
-          // Queue for later
-          await addToQueue({ url: parsed.url, title: parsed.title, text: parsed.text });
+        const outcome = await saveSharedContent(shareData);
+        if (outcome.queued) {
           setState('success');
           infoToast('Queued for sync', 'Saved offline - will sync when online');
+        } else {
+          setSavedItem(outcome.item);
+          setState('success');
+          successToast('Saved!', `"${outcome.item.title || 'Link'}" added to CURIO`);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to save';
@@ -87,24 +117,34 @@ export function ShareTargetPage() {
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
       if (event.data?.type === 'SHARED_CONTENT' && state === 'idle') {
-        const { url, title, text } = event.data.payload;
-        // Update URL params to trigger processing
-        const params = new URLSearchParams();
-        if (url) params.set('url', url);
-        if (title) params.set('title', title);
-        if (text) params.set('text', text);
-        window.history.replaceState({}, '', `/share-target?${params.toString()}`);
+        setState('processing');
+        try {
+          const outcome = await saveSharedContent(event.data.payload || {});
+          if (outcome.queued) {
+            setState('success');
+            infoToast('Queued for sync', 'Saved offline - will sync when online');
+          } else {
+            setSavedItem(outcome.item);
+            setState('success');
+            successToast('Saved!', `"${outcome.item.title || 'Link'}" added to CURIO`);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Failed to save';
+          setError(message);
+          setState('error');
+          errorToast('Save failed', message);
+        }
       }
     };
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [state]);
+  }, [state, successToast, errorToast, infoToast]);
 
   // If no share data and idle, show instruction page
   if (state === 'idle') {
     return (
-      <ShareInstructionsPage />
+      <ShareInstructionsPage url={manualUrl} setUrl={setManualUrl} onSave={handleManualSave} />
     );
   }
 
@@ -117,7 +157,7 @@ export function ShareTargetPage() {
             <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
               <Loader2 className="h-8 w-8 text-primary animate-spin" />
             </div>
-            <h2 className="text-xl font-bold mb-2">Saving to MindSpace...</h2>
+            <h2 className="text-xl font-bold mb-2">Saving to CURIO...</h2>
             <p className="text-muted-foreground">Processing your share</p>
           </CardContent>
         </Card>
@@ -134,7 +174,7 @@ export function ShareTargetPage() {
             <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center">
               <CheckCircle className="h-8 w-8 text-green-500" />
             </div>
-            <h2 className="text-xl font-bold mb-2">Saved to MindSpace!</h2>
+            <h2 className="text-xl font-bold mb-2">Saved to CURIO!</h2>
             <p className="text-muted-foreground mb-6">Your content is now organized and searchable</p>
 
             {savedItem && (
@@ -152,7 +192,7 @@ export function ShareTargetPage() {
             <div className="flex gap-3">
               <Button className="flex-1" onClick={() => navigate('/')}>
                 <Brain className="h-4 w-4 mr-2" />
-                View in MindSpace
+                View in CURIO
               </Button>
               <Button variant="outline" className="flex-1" onClick={() => window.close()}>
                 <XCircle className="h-4 w-4 mr-2" />
@@ -204,7 +244,7 @@ export function ShareTargetPage() {
    Instructions Page (when opened directly)
    ============================================ */
 
-function ShareInstructionsPage() {
+function ShareInstructionsPage({ url, setUrl, onSave }: { url: string; setUrl: (url: string) => void; onSave: () => void }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md text-center">
@@ -213,11 +253,24 @@ function ShareInstructionsPage() {
           <Brain className="h-10 w-10 text-primary-foreground" />
         </div>
 
-        <h1 className="text-3xl font-bold mb-2">MindSpace Share Target</h1>
+        <h1 className="text-3xl font-bold mb-2">Save to CURIO</h1>
         <p className="text-muted-foreground mb-8">
-          This page receives content from the system share sheet.
-          You don't need to open this directly.
+          iPhone PWAs cannot currently receive items directly from the system share sheet. Use Instagram’s Copy Link, then paste it into CURIO.
         </p>
+
+        <div className="mb-6 flex gap-2">
+          <input
+            aria-label="Reel or video link"
+            type="url"
+            inputMode="url"
+            autoComplete="url"
+            placeholder="Paste a Reel or video link"
+            value={url}
+            onChange={event => setUrl(event.target.value)}
+            className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+          />
+          <Button onClick={onSave} disabled={!url.trim()}>Save link</Button>
+        </div>
 
         <Card>
           <CardHeader>
@@ -231,7 +284,7 @@ function ShareInstructionsPage() {
               <strong>Tap Share</strong> on a post, reel, link, or selected text
             </Step>
             <Step number={3} icon={<Brain className="h-5 w-5" />}>
-              <strong>Select "MindSpace"</strong> from the share sheet
+              <strong>On iPhone, copy the link</strong> from the share sheet, then open CURIO and paste it
             </Step>
             <Step number={4} icon={<CheckCircle className="h-5 w-5" />}>
               <strong>Done!</strong> Content is saved, tagged, and searchable
@@ -241,18 +294,22 @@ function ShareInstructionsPage() {
 
         <div className="mt-8 p-4 rounded-lg bg-muted/50">
           <p className="text-sm text-muted-foreground">
-            <strong>First time?</strong> Open MindSpace in Safari, tap Share → "Add to Home Screen".
-            Then it'll appear in your share sheet automatically.
+            <strong>Shortcut option:</strong> Create a Shortcut that accepts URLs from the share sheet and opens CURIO’s save-link page with that URL.
           </p>
         </div>
 
         <Button className="mt-6 w-full" onClick={() => window.location.href = '/'}>
           <Brain className="h-4 w-4 mr-2" />
-          Open MindSpace
+          Open CURIO
         </Button>
       </div>
     </div>
   );
+}
+
+function findUrl(value: string): string | null {
+  const match = value.match(/https?:\/\/[^\s<>"']+/i);
+  return match ? match[0].replace(/[),.!?]+$/, '') : null;
 }
 
 function Step({ number, icon, children }: { number: number; icon: React.ReactNode; children: React.ReactNode }) {

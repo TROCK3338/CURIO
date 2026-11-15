@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, ExternalLink, Copy, Tag, Calendar, Globe, User, Loader2, Sparkles, Brain } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getItemLocally } from '../services/indexeddb';
-import { searchItems } from '../services/api';
+import { getItem } from '../services/api';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge, PlatformBadge } from '../components/ui/Badge';
@@ -34,8 +34,7 @@ export function ItemPage() {
         }
 
         // Also try server for freshest data
-        const result = await searchItems({ q: '', limit: 1 });
-        const serverItem = result.items.find(i => i.id === id);
+        const serverItem = await getItem(id);
         if (serverItem) setItem(serverItem);
       } catch (error) {
         console.error('Failed to load item:', error);

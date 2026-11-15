@@ -5,7 +5,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
-import { getDb, initializeSchema, searchItems } from './lib/db';
+import { getDb, initializeSchema, searchItems, semanticSearch } from './lib/db';
 import { generateEmbedding, chatWithSaves } from './lib/gemini';
 import type { ChatRequest, ChatResponse, SavedItem } from './lib/types';
 
@@ -50,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Find relevant items using semantic search
     const queryEmbedding = await generateEmbedding(message);
-    const { items } = await searchItems('', filter || {}, contextLimit * 2, 0);
+    const { items } = await semanticSearch(queryEmbedding, filter || {}, contextLimit * 2, 0, message);
 
     let relevantItems: SavedItem[] = items;
     if (items.length > 0) {

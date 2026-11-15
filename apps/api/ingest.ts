@@ -5,7 +5,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
-import { getDb, initializeSchema, upsertItem } from './lib/db';
+import { getDb, initializeSchema, rowToItem, upsertItem } from './lib/db';
 import { processItem, generateEmbedding } from './lib/gemini';
 import { detectPlatform, enrichUrl, extractShortcode, quickEntityExtraction } from './lib/extractor';
 import type { SavedItem, IngestRequest, IngestResponse, Platform } from './lib/types';
@@ -15,7 +15,7 @@ import type { SavedItem, IngestRequest, IngestResponse, Platform } from './lib/t
 // ============================================
 
 const IngestSchema = z.object({
-  url: z.string().url(),
+  url: z.string().trim().url(),
   title: z.string().optional(),
   text: z.string().optional(),
   userNote: z.string().optional(),
@@ -60,7 +60,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const { url, title, text, userNote } = parseResult.data;
+    const { title, text, userNote } = parseResult.data;
+    let url: string;
+    try {
+      const parsedUrl = new URL(parseResult.data.url);
+      if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+        throw new Error('Only HTTP and HTTPS links can be saved');
+      }
+      url = parsedUrl.toString();
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Invalid URL',
+      });
+    }
 
     // Check if already saved
     const db = getDb();
@@ -71,9 +84,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (existing.rows.length > 0) {
       const existingId = existing.rows[0].id as string;
+      const existingItem = await db.execute({
+        sql: 'SELECT * FROM items WHERE id = ?',
+        args: [existingId],
+      });
+      const { embedding: _embedding, ...savedItem } = rowToItem(existingItem.rows[0] as Record<string, unknown>);
       return res.status(200).json({
         success: true,
-        item: { id: existingId, url },
+        item: savedItem,
         message: 'Already saved',
       });
     }
@@ -91,12 +109,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const quickEntities = quickEntityExtraction(combinedNote || url);
 
     // Process with Gemini AI
-    const processed = await processItem(
-      url,
-      platform,
-      title ?? enriched.title ?? null,
-      combinedNote || null,
-    );
+    let processed: Awaited<ReturnType<typeof processItem>>;
+    try {
+      processed = await processItem(
+        url,
+        platform,
+        title ?? enriched.title ?? null,
+        combinedNote || null,
+      );
+    } catch (error) {
+      console.warn('[Ingest] AI enrichment unavailable; saving link without AI:', error);
+      processed = {
+        summary: combinedNote || `Saved ${platform} link`,
+        tags: [],
+        entities: {},
+      };
+    }
 
     // Merge entities (AI + quick)
     const mergedEntities = { ...quickEntities, ...processed.entities };
@@ -110,7 +138,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       Object.values(mergedEntities).flatMap(e => Object.values(e as Record<string, unknown>)).filter(v => typeof v === 'string').join(' '),
     ].filter(Boolean).join('\n');
 
-    const embedding = await generateEmbedding(embeddingText);
+    let embedding: Float32Array | null = null;
+    try {
+      embedding = await generateEmbedding(embeddingText);
+    } catch (error) {
+      console.warn('[Ingest] Embedding unavailable; saving without semantic index:', error);
+    }
 
     // Build item - ensure all optional fields are null not undefined
     const now = new Date().toISOString();
@@ -123,7 +156,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       summary: processed.summary,
       tags: [...new Set([...processed.tags, platform, ...(enriched.tags || [])])],
       entities: mergedEntities,
-      embedding: Array.from(embedding),
+      embedding: embedding ? Array.from(embedding) : null,
       mediaUrl: enriched.mediaUrl ?? null,
       thumbnailUrl: enriched.thumbnailUrl ?? null,
       authorUsername: (enriched.authorUsername ?? extractShortcode(url, platform) ?? null) as string | null,
@@ -131,8 +164,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       publishedAt: enriched.publishedAt ?? null,
       savedAt: now,
       updatedAt: now,
-      enrichmentStatus: 'enriched',
-      enrichmentError: null,
+      enrichmentStatus: embedding ? 'enriched' : 'pending',
+      enrichmentError: embedding ? null : 'Saved without semantic enrichment',
     };
 
     // Store in database

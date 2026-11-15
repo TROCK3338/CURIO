@@ -11,12 +11,14 @@ import type { SavedItem, ExtractedEntities, Platform } from './types';
 // Configuration
 // ============================================
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-  throw new Error('Missing GEMINI_API_KEY environment variable');
+let genAI: GoogleGenerativeAI | null = null;
+function getGenAI(): GoogleGenerativeAI {
+  if (genAI) return genAI;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('Missing GEMINI_API_KEY environment variable');
+  genAI = new GoogleGenerativeAI(apiKey);
+  return genAI;
 }
-
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 const FLASH_MODEL = 'gemini-1.5-flash';
 const EMBEDDING_MODEL = 'text-embedding-004';
@@ -81,16 +83,18 @@ QUESTION:`;
 // Model Instances
 // ============================================
 
-const flashModel = genAI.getGenerativeModel({
-  model: FLASH_MODEL,
-  safetySettings,
-  generationConfig,
-  systemInstruction: SYSTEM_PROMPT,
-});
+function getFlashModel() {
+  return getGenAI().getGenerativeModel({
+    model: FLASH_MODEL,
+    safetySettings,
+    generationConfig,
+    systemInstruction: SYSTEM_PROMPT,
+  });
+}
 
-const embeddingModel = genAI.getGenerativeModel({
-  model: EMBEDDING_MODEL,
-});
+function getEmbeddingModel() {
+  return getGenAI().getGenerativeModel({ model: EMBEDDING_MODEL });
+}
 
 // ============================================
 // Core AI Functions
@@ -98,7 +102,7 @@ const embeddingModel = genAI.getGenerativeModel({
 
 export async function generateEmbedding(text: string): Promise<Float32Array> {
   try {
-    const result = await embeddingModel.embedContent(text);
+    const result = await getEmbeddingModel().embedContent(text);
     const embedding = result.embedding.values;
     return new Float32Array(embedding);
   } catch (error) {
@@ -143,7 +147,7 @@ Return ONLY a JSON object with keys: summary (string), tags (string[]), entities
 `;
 
   try {
-    const result = await flashModel.generateContent(prompt);
+    const result = await getFlashModel().generateContent(prompt);
     const response = result.response.text();
 
     const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -194,7 +198,7 @@ Tags: ${item.tags.join(', ')}
   const prompt = CHAT_PROMPT(context) + question;
 
   try {
-    const result = await flashModel.generateContent(prompt);
+    const result = await getFlashModel().generateContent(prompt);
     const answer = result.response.text().trim();
 
     const citations = contextItems
@@ -252,7 +256,7 @@ Return ONLY a JSON array of clusters:
 `;
 
   try {
-    const result = await flashModel.generateContent(prompt);
+    const result = await getFlashModel().generateContent(prompt);
     const response = result.response.text();
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     const jsonStr = jsonMatch ? jsonMatch[0] : response;
@@ -265,7 +269,7 @@ Return ONLY a JSON array of clusters:
 
 export async function countTokens(text: string): Promise<number> {
   try {
-    const result = await flashModel.countTokens(text);
+    const result = await getFlashModel().countTokens(text);
     return result.totalTokens;
   } catch {
     return Math.ceil(text.length / 4);

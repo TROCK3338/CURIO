@@ -28,11 +28,12 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isPending) return;
+  const handleSubmit = async (e?: { preventDefault?: () => void }, suggestedMessage?: string) => {
+    e?.preventDefault?.();
+    const message = (suggestedMessage || input).trim();
+    if (!message || isPending) return;
 
-    const userMessage = input.trim();
+    const userMessage = message;
     setInput('');
     setMessages(prev => [...prev, { role: 'user', content: userMessage, timestamp: new Date() }]);
     setIsTyping(true);
@@ -123,7 +124,7 @@ export function ChatPage() {
                   variant="outline"
                   size="sm"
                   className="text-left min-w-[200px]"
-                  onClick={() => { setInput(prompt); handleSubmit(new Event('submit')); }}
+                  onClick={() => { void handleSubmit(undefined, prompt); }}
                 >
                   {prompt}
                 </Button>
