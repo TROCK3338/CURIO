@@ -5,8 +5,8 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
-import { getDb, initializeSchema, searchItems, semanticSearch } from './lib/db';
-import { generateEmbedding, chatWithSaves } from './lib/gemini';
+import { getDb, initializeSchema, searchItems, semanticSearch } from './lib/db.js';
+import { generateEmbedding, chatWithSaves } from './lib/gemini.js';
 import type { ChatRequest, ChatResponse, SavedItem } from './lib/types';
 
 const CORS_HEADERS = {

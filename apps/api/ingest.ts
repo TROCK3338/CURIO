@@ -5,9 +5,9 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
-import { getDb, initializeSchema, rowToItem, upsertItem } from './lib/db';
-import { processItem, generateEmbedding } from './lib/gemini';
-import { detectPlatform, enrichUrl, extractShortcode, quickEntityExtraction } from './lib/extractor';
+import { getDb, initializeSchema, rowToItem, upsertItem } from './lib/db.js';
+import { processItem, generateEmbedding } from './lib/gemini.js';
+import { detectPlatform, enrichUrl, extractShortcode, quickEntityExtraction } from './lib/extractor.js';
 import type { SavedItem, IngestRequest, IngestResponse, Platform } from './lib/types';
 
 // ============================================

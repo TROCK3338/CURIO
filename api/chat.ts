@@ -1,1 +1,1 @@
-export { default } from '../apps/api/chat.ts';
+export { default } from '../apps/api/chat.js';

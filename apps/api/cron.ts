@@ -4,8 +4,8 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDb, initializeSchema, saveClusters } from './lib/db';
-import { generateClusters } from './lib/gemini';
+import { getDb, initializeSchema, saveClusters } from './lib/db.js';
+import { generateClusters } from './lib/gemini.js';
 import type { SavedItem } from './lib/types';
 
 const CRON_SECRET = process.env.CRON_SECRET;

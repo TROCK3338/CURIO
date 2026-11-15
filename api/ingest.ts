@@ -1,1 +1,1 @@
-export { default } from '../apps/api/ingest.ts';
+export { default } from '../apps/api/ingest.js';

@@ -1,1 +1,1 @@
-export { default } from '../../apps/api/items/[id].ts';
+export { default } from '../../apps/api/items/[id].js';

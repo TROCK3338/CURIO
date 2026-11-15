@@ -4,8 +4,8 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDb, initializeSchema, getLatestClusters, saveClusters } from './lib/db';
-import { generateClusters } from './lib/gemini';
+import { getDb, initializeSchema, getLatestClusters, saveClusters } from './lib/db.js';
+import { generateClusters } from './lib/gemini.js';
 import type { ClusterResponse, SavedItem } from './lib/types';
 
 const CORS_HEADERS = {

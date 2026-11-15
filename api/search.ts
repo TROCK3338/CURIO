@@ -1,1 +1,1 @@
-export { default } from '../apps/api/search.ts';
+export { default } from '../apps/api/search.js';

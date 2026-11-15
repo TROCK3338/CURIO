@@ -1,1 +1,1 @@
-export { default } from '../apps/api/cron.ts';
+export { default } from '../apps/api/cron.js';

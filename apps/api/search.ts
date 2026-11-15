@@ -5,8 +5,8 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
-import { getDb, initializeSchema, searchItems, semanticSearch } from './lib/db';
-import { generateEmbedding } from './lib/gemini';
+import { getDb, initializeSchema, searchItems, semanticSearch } from './lib/db.js';
+import { generateEmbedding } from './lib/gemini.js';
 import type { SearchRequest, SearchResponse, Platform } from './lib/types';
 
 const CORS_HEADERS = {
