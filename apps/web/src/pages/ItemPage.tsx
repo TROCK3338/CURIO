@@ -1,9 +1,9 @@
+import { Fragment, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useEffect, useState } from 'react';
 import { ArrowLeft, ExternalLink, Copy, Tag, Calendar, Globe, User, Loader2, Sparkles, Brain } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getItemLocally } from '../services/indexeddb';
-import { getItem } from '../services/api';
+import { getItem, searchItems } from '../services/api';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge, PlatformBadge } from '../components/ui/Badge';
@@ -242,10 +242,10 @@ function EntityCard({ type, data }: { type: string; data: any }) {
       <dl className="grid grid-cols-2 gap-2 text-sm">
         {Object.entries(data).map(([key, value]) => (
           value != null && value !== '' && (
-            <React.Fragment key={key}>
+            <Fragment key={key}>
               <dt className="text-muted-foreground">{key.charAt(0).toUpperCase() + key.slice(1)}</dt>
-              <dd className="font-medium">{Array.isArray(value) ? value.join(', ') : value}</dd>
-            </React.Fragment>
+              <dd className="font-medium">{Array.isArray(value) ? value.join(', ') : String(value)}</dd>
+            </Fragment>
           )
         ))}
       </dl>

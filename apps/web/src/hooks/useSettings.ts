@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { getSettings, saveSettings, resetSettings, DEFAULT_SETTINGS } from '../services/indexeddb';
+import { getSettings, saveSettings, resetSettings, DEFAULT_SETTINGS, getPendingQueue } from '../services/indexeddb';
 import { initializeSync, stopSync, triggerManualSync, getSyncStatus } from '../services/sync';
 import type { UserSettings } from '@mindspace/shared';
 
@@ -12,6 +12,12 @@ export function useSettings() {
   const [settings, setSettingsState] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState(getSyncStatus());
+  const [queuedCount, setQueuedCount] = useState(0);
+
+  const refreshQueuedCount = useCallback(async () => {
+    const pending = await getPendingQueue();
+    setQueuedCount(pending.length);
+  }, []);
 
   // Load settings on mount
   useEffect(() => {
@@ -20,10 +26,19 @@ export function useSettings() {
       setSettingsState(stored);
       await initializeSync(stored);
       setSyncStatus(getSyncStatus());
+      await refreshQueuedCount();
       setIsLoading(false);
     };
     load();
-  }, []);
+    window.addEventListener('queue-updated', refreshQueuedCount);
+    window.addEventListener('sync-complete', refreshQueuedCount);
+    window.addEventListener('sync-errors', refreshQueuedCount);
+    return () => {
+      window.removeEventListener('queue-updated', refreshQueuedCount);
+      window.removeEventListener('sync-complete', refreshQueuedCount);
+      window.removeEventListener('sync-errors', refreshQueuedCount);
+    };
+  }, [refreshQueuedCount]);
 
   // Persist settings changes
   const updateSettings = useCallback(async (updates: Partial<UserSettings>) => {
@@ -54,12 +69,13 @@ export function useSettings() {
   const manualSync = useCallback(async () => {
     await triggerManualSync();
     setSyncStatus(getSyncStatus());
-  }, []);
+    await refreshQueuedCount();
+  }, [refreshQueuedCount]);
 
   return {
     settings,
     isLoading,
-    syncStatus,
+    syncStatus: { ...syncStatus, queuedCount },
     updateSettings,
     reset,
     manualSync,

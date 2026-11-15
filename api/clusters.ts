@@ -1,1 +1,1 @@
-export { default } from '../apps/api/clusters';
+export { default } from '../apps/api/clusters.ts';

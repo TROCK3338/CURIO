@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search, X, Filter, SlidersHorizontal, Tag, Calendar, Globe, Brain } from 'lucide-react';
-import { useSearch, useLocalSearch, useSearchSuggestions, useFilters } from '../hooks/useItems';
-import { useSemanticSearch } from '../hooks/useSemanticSearch';
+import { useSearch, useInfiniteSearch, useFilters } from '../hooks/useItems';
+import { useSemanticSearch, useSearchSuggestions } from '../hooks/useSemanticSearch';
 import { useSettings } from '../hooks/useSettings';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -42,42 +42,37 @@ export function SearchPage() {
   }, [query, filters, setSearchParams]);
 
   // Fetch suggestions for autocomplete
-  const { data: allItems } = useSearch({ limit: 500 });
+  const { data: allItems } = useSearch({ limit: 100, semantic: false });
   const suggestions = useSearchSuggestions(allItems?.items || []);
 
   // Semantic search (local)
   const semantic = useSemanticSearch(allItems?.items || []);
-  semantic.setQuery(query);
+  useEffect(() => semantic.setQuery(query), [query]);
 
   // Server search (when semantic not enough)
-  const serverSearch = useSearch({
+  const serverSearch = useInfiniteSearch({
     q: query,
-    platform: filters.platform,
+    platform: filters.platform || undefined,
     tags: filters.tags.length ? filters.tags : undefined,
-    dateFrom: filters.dateFrom,
-    dateTo: filters.dateTo,
+    dateFrom: filters.dateFrom ? new Date(`${filters.dateFrom}T00:00:00.000Z`).toISOString() : undefined,
+    dateTo: filters.dateTo ? new Date(`${filters.dateTo}T23:59:59.999Z`).toISOString() : undefined,
     limit: settings.itemsPerPage,
     semantic: true,
   });
 
+  const serverItems = serverSearch.data?.pages.flatMap(page => page.items) || [];
+  const serverTotal = serverSearch.data?.pages[0]?.total || 0;
+
   // Use semantic results if available, else server
   const results = semantic.mode === 'local' && semantic.results.length > 0
     ? { items: semantic.results, total: semantic.results.length, hasMore: false, isLoading: semantic.isSearching }
-    : serverSearch;
+    : { items: serverItems, total: serverTotal, hasMore: Boolean(serverSearch.hasNextPage), isLoading: serverSearch.isLoading };
 
   // Filter platforms from items
   const platforms = [...new Set(allItems?.items?.map(i => i.platform) || [])].filter(Boolean);
 
   // Filter tags from items
   const allTags = [...new Set(allItems?.items?.flatMap(i => i.tags) || [])].filter(Boolean).slice(0, 30);
-
-  // Debounce query for server search
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      serverSearch.refetch();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query, filters, serverSearch]);
 
   return (
     <div className="space-y-6">

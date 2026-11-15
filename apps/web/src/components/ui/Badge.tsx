@@ -35,7 +35,7 @@ export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
 Badge.displayName = 'Badge';
 
 /* Platform-specific badge colors */
-export function PlatformBadge({ platform }: { platform: string }) {
+export function PlatformBadge({ platform, className }: { platform: string; className?: string }) {
   const colors: Record<string, string> = {
     instagram: 'bg-gradient-to-r from-purple-500 to-pink-500 text-white',
     tiktok: 'bg-black text-white',
@@ -52,7 +52,7 @@ export function PlatformBadge({ platform }: { platform: string }) {
   const style = colors[platform] || colors.generic;
 
   return (
-    <Badge variant="platform" className={style} style={{ border: 'none' }}>
+    <Badge variant="platform" className={cn(style, className)} style={{ border: 'none' }}>
       {platform.charAt(0).toUpperCase() + platform.slice(1)}
     </Badge>
   );

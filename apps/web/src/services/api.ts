@@ -24,8 +24,14 @@ async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T>
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new ApiError(response.status, error.error || 'Request failed', error.details);
+    let error: { error?: string; details?: unknown } = {};
+    try {
+      error = await response.json();
+    } catch {
+      // Vercel runtime crashes may return an HTML error page instead of JSON.
+    }
+    const message = error.error || `CURIO server request failed (${response.status})`;
+    throw new ApiError(response.status, message, error.details);
   }
 
   return response.json();

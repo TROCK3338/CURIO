@@ -3,11 +3,11 @@
  * Handles caching, synchronization, and optimistic updates
  */
 
-import { useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient, UseQueryOptions } from '@tanstack/react-query';
-import { searchItems, chatWithSaves, getClusters, regenerateClusters, ingestItem } from '../services/api';
+import { useEffect, useState, useCallback } from 'react';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
+import { searchItems, chatWithSaves, getClusters, regenerateClusters, ingestItem, type SearchParams } from '../services/api';
 import { getItemsLocally, saveItemLocally, searchItemsLocally } from '../services/indexeddb';
-import type { SavedItem, SearchParams, ChatParams, IngestRequest, IngestResponse } from '@mindspace/shared';
+import type { SavedItem, SearchResponse, ChatParams, IngestRequest, IngestResponse } from '@mindspace/shared';
 
 const ITEMS_QUERY_KEY = ['items'] as const;
 
@@ -15,8 +15,11 @@ const ITEMS_QUERY_KEY = ['items'] as const;
    Search Hook
    ============================================ */
 
-export function useSearch(params: SearchParams = {}, options?: UseQueryOptions) {
-  return useQuery({
+export function useSearch(
+  params: SearchParams = {},
+  options?: Omit<UseQueryOptions<SearchResponse, Error>, 'queryKey' | 'queryFn'>,
+) {
+  return useQuery<SearchResponse, Error>({
     queryKey: [...ITEMS_QUERY_KEY, 'search', params],
     queryFn: () => searchItems(params),
     placeholderData: (previous) => previous, // Keep previous data while fetching
@@ -38,24 +41,13 @@ export function useLocalSearch(query: string, limit = 20) {
    Infinite Scroll Search
    ============================================ */
 
-export function useInfiniteSearch(params: Omit<SearchParams, 'offset' | 'limit'> = {}) {
-  return useQuery({
+export function useInfiniteSearch(params: SearchParams = {}) {
+  const limit = params.limit ?? 50;
+  return useInfiniteQuery({
     queryKey: [...ITEMS_QUERY_KEY, 'infinite', params],
-    queryFn: async () => {
-      const allItems: SavedItem[] = [];
-      let offset = 0;
-      const limit = 50;
-      let hasMore = true;
-
-      while (hasMore && allItems.length < 500) {
-        const result = await searchItems({ ...params, offset, limit });
-        allItems.push(...result.items);
-        hasMore = result.hasMore;
-        offset += limit;
-      }
-
-      return { items: allItems, total: allItems.length, hasMore: false };
-    },
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => searchItems({ ...params, offset: pageParam, limit }),
+    getNextPageParam: (lastPage, allPages) => lastPage.hasMore ? allPages.length * limit : undefined,
     staleTime: 1000 * 60 * 5,
   });
 }
@@ -274,5 +266,3 @@ export function useFilters() {
 
   return { filters, setFilters, toggleTag, setPlatform, setDateRange, clearFilters, hasActiveFilters };
 }
-
-import { useState, useCallback } from 'react';

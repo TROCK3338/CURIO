@@ -7,7 +7,7 @@ import { Switch } from '../components/ui/Switch';
 import { Label } from '../components/ui/Label';
 import { Separator } from '../components/ui/Separator';
 import { cn } from '../utils/cn';
-import { Brain, Cloud, Moon, Sun, Monitor, Database, Bell, Shield, Trash2, Download, Upload } from 'lucide-react';
+import { Brain, Cloud, Moon, Sun, Monitor, Database, Bell, Shield, Trash2, Download, Upload, Loader2 } from 'lucide-react';
 import { useSuccessToast, useErrorToast } from '../components/ui/Toast';
 
 export function SettingsPage() {
@@ -43,7 +43,7 @@ export function SettingsPage() {
             variant={activeTab === tab.id ? 'default' : 'ghost'}
             size="sm"
             className="flex-1 gap-2"
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => setActiveTab(tab.id as typeof activeTab)}
           >
             {tab.icon} {tab.label}
           </Button>

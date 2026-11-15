@@ -19,7 +19,7 @@ export function HomePage() {
   const successToast = useSuccessToast();
 
   // Fetch items
-  const { items, isLoading, isError, refetch, hasMore } = useHybridItems({ limit: settings.itemsPerPage });
+  const { items, isLoading, isError, error, refetch, hasMore } = useHybridItems({ limit: settings.itemsPerPage });
 
   // Fetch clusters
   const { data: clustersData } = useClusters();
@@ -54,7 +54,13 @@ export function HomePage() {
       <div className="flex flex-col items-center justify-center h-64 text-center">
         <Brain className="h-12 w-12 text-muted-foreground/50 mb-4" />
         <h2 className="text-xl font-semibold">Unable to load saves</h2>
-        <p className="text-muted-foreground mt-1">Check your connection and try again</p>
+        <p className="text-muted-foreground mt-1">
+          {!navigator.onLine
+            ? 'You appear to be offline. Check your connection and try again.'
+            : error instanceof Error
+              ? error.message
+              : 'CURIO could not reach its save service. Please try again.'}
+        </p>
         <Button onClick={() => refetch()} className="mt-4">Retry</Button>
       </div>
     );

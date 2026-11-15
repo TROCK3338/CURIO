@@ -1,26 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle, Loader2, XCircle, AlertCircle, Share2, Brain, Zap } from 'lucide-react';
 import { addToQueue, parseShareTargetData, saveItemLocally } from '../services/indexeddb';
 import { ingestItem } from '../services/api';
-import { initializeSync } from '../services/sync';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { cn } from '../utils/cn';
-import { useSuccessToast, useErrorToast, useInfoToast } from '../components/ui/Toast';
+import { useSuccessToast, useInfoToast } from '../components/ui/Toast';
 
 export function ShareTargetPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const successToast = useSuccessToast();
-  const errorToast = useErrorToast();
   const infoToast = useInfoToast();
 
   const [state, setState] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [savedItem, setSavedItem] = useState<any>(null);
   const [manualUrl, setManualUrl] = useState('');
+  const attemptedShareRef = useRef<string | null>(null);
 
   const saveSharedContent = async (data: { url?: string | null; title?: string | null; text?: string | null }) => {
     const parsed = parseShareTargetData(data);
@@ -35,6 +34,7 @@ export function ShareTargetPage() {
     const payload = { url: validUrl.toString(), title: parsed.title || undefined, text: parsed.text || undefined };
     if (!navigator.onLine) {
       await addToQueue(payload);
+      window.dispatchEvent(new Event('queue-updated'));
       return { queued: true as const };
     }
 
@@ -48,6 +48,7 @@ export function ShareTargetPage() {
       // so we don't tell the user their link was saved when it was rejected.
       if (error instanceof TypeError) {
         await addToQueue(payload);
+        window.dispatchEvent(new Event('queue-updated'));
         return { queued: true as const };
       }
       throw error;
@@ -70,7 +71,6 @@ export function ShareTargetPage() {
       const message = err instanceof Error ? err.message : 'Failed to save';
       setError(message);
       setState('error');
-      errorToast('Save failed', message);
     }
   };
 
@@ -81,12 +81,18 @@ export function ShareTargetPage() {
       const url = searchParams.get('url');
       const title = searchParams.get('title');
       const text = searchParams.get('text');
+      const shareKey = JSON.stringify([url, title, text]);
 
       if (!url && !title && !text) {
         // No share data - might be direct navigation
         setState('idle');
         return;
       }
+
+      // React Strict Mode may mount effects twice in development. Never ingest
+      // the same share payload twice during one page session.
+      if (attemptedShareRef.current === shareKey) return;
+      attemptedShareRef.current = shareKey;
 
       setState('processing');
       setError(null);
@@ -106,12 +112,11 @@ export function ShareTargetPage() {
         const message = err instanceof Error ? err.message : 'Failed to save';
         setError(message);
         setState('error');
-        errorToast('Save failed', message);
       }
     };
 
     processShare();
-  }, [searchParams, successToast, errorToast, infoToast]);
+  }, [searchParams, successToast, infoToast]);
 
   // Handle POST data from service worker (via message)
   useEffect(() => {
@@ -132,14 +137,13 @@ export function ShareTargetPage() {
           const message = err instanceof Error ? err.message : 'Failed to save';
           setError(message);
           setState('error');
-          errorToast('Save failed', message);
         }
       }
     };
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [state, successToast, errorToast, infoToast]);
+  }, [state, successToast, infoToast]);
 
   // If no share data and idle, show instruction page
   if (state === 'idle') {
@@ -222,10 +226,7 @@ export function ShareTargetPage() {
             <p className="text-muted-foreground mb-6">{error || 'An unknown error occurred'}</p>
 
             <div className="flex gap-3">
-              <Button className="flex-1" onClick={() => window.location.reload()}>
-                <Loader2 className="h-4 w-4 mr-2" />
-                Try Again
-              </Button>
+              <Button className="flex-1" onClick={() => window.location.reload()}>Try Again</Button>
               <Button variant="outline" className="flex-1" onClick={() => navigate('/')}>
                 <XCircle className="h-4 w-4 mr-2" />
                 Go Home

@@ -1,15 +1,22 @@
 import { createContext, useContext, useState, useRef, useEffect, ReactNode } from 'react';
+import { Slot } from '@radix-ui/react-slot';
 import { cn } from '../../utils/cn';
 import { X, ChevronDown } from 'lucide-react';
 
-const DropdownMenuContext = createContext<{ open: boolean; onToggle: () => void; onClose: () => void } | null>(null);
+const DropdownMenuContext = createContext<{
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  triggerRef: React.RefObject<HTMLButtonElement>;
+  contentRef: React.RefObject<HTMLDivElement>;
+} | null>(null);
 
 export function DropdownMenu({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const onToggle = () => setOpen(!open);
+  const onToggle = () => setOpen(value => !value);
   const onClose = () => setOpen(false);
 
   useEffect(() => {
@@ -34,20 +41,24 @@ export function DropdownMenu({ children }: { children: ReactNode }) {
   }, [open]);
 
   return (
-    <DropdownMenuContext.Provider value={{ open, onToggle, onClose }}>
+    <DropdownMenuContext.Provider value={{ open, onToggle, onClose, triggerRef, contentRef }}>
       <div className="relative inline-block">{children}</div>
     </DropdownMenuContext.Provider>
   );
 }
 
-export function DropdownMenuTrigger({ children, className, ...props }: { children: ReactNode; className?: string } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+export function DropdownMenuTrigger({ children, className, asChild = false, onClick, ...props }: { children: ReactNode; className?: string; asChild?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const context = useContext(DropdownMenuContext);
   if (!context) throw new Error('DropdownMenuTrigger must be used within DropdownMenu');
 
+  const Component = asChild ? Slot : 'button';
   return (
-    <button
-      ref={context.onToggle}
-      onClick={context.onToggle}
+    <Component
+      ref={context.triggerRef}
+      onClick={event => {
+        onClick?.(event as React.MouseEvent<HTMLButtonElement>);
+        if (!event.defaultPrevented) context.onToggle();
+      }}
       className={cn(
         'inline-flex items-center gap-1.5 rounded-md bg-background px-3 py-2 text-sm font-medium',
         'ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -58,8 +69,8 @@ export function DropdownMenuTrigger({ children, className, ...props }: { childre
       {...props}
     >
       {children}
-      <ChevronDown className={cn('h-4 w-4 transition-transform', context.open && 'rotate-180')} />
-    </button>
+      {!asChild && <ChevronDown className={cn('h-4 w-4 transition-transform', context.open && 'rotate-180')} />}
+    </Component>
   );
 }
 
@@ -71,7 +82,7 @@ export function DropdownMenuContent({ children, className, align = 'end', ...pro
 
   return (
     <div
-      ref={contentRef}
+      ref={context.contentRef}
       className={cn(
         'relative z-50 min-w-[8rem] origin-top-right rounded-md border bg-popover p-1 text-popover-foreground',
         'shadow-lg animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2',
@@ -138,5 +149,3 @@ export function DropdownMenuCheckboxItem({ className, checked, onCheckedChange, 
     </div>
   );
 }
-
-const contentRef = { current: null as HTMLDivElement | null };

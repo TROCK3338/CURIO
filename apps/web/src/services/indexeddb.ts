@@ -202,8 +202,8 @@ export function parseShareTargetData(data: ShareTargetData): {
    ============================================ */
 
 export async function vacuum(): Promise<void> {
-  // Dexie doesn't expose VACUUM directly, but we can trigger it
-  await db.backendDB().then(db => db.execute('VACUUM'));
+  // IndexedDB manages storage compaction; there is no SQL VACUUM operation.
+  await db.open();
 }
 
 export async function getDBSize(): Promise<{ items: number; queue: number; settings: number }> {

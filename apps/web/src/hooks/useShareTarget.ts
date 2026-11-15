@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { addToQueue, parseShareTargetData } from '../services/indexeddb';
+import { addToQueue, getPendingQueue, parseShareTargetData } from '../services/indexeddb';
 import { ingestItem } from '../services/api';
 import { initializeSync, triggerManualSync, getSyncStatus } from '../services/sync';
 import { getSettings } from '../services/indexeddb';
@@ -57,15 +57,14 @@ export function useShareTarget(): ShareTargetState & {
   }, []);
 
   const updateQueuedCount = useCallback(async () => {
-    const { queue } = await import('../services/indexeddb');
-    const pending = await queue.where('status').anyOf(['pending', 'failed']).toArray();
+    const pending = await getPendingQueue();
     setState(s => ({ ...s, queuedCount: pending.length }));
   }, []);
 
   const processShareData = useCallback(async (data: ShareTargetData) => {
     setState(s => ({ ...s, isProcessing: true, lastResult: null, error: null }));
 
-    const { url, title, text, files } = parseShareTargetData(data);
+    const { url, title, text } = parseShareTargetData(data);
 
     if (!url) {
       setState(s => ({ ...s, isProcessing: false, lastResult: 'error', error: 'No URL provided' }));
@@ -74,18 +73,30 @@ export function useShareTarget(): ShareTargetState & {
 
     const payload: IngestRequest = { url, title, text };
 
-    try {
-      if (navigator.onLine) {
-        // Try direct API call first
-        await ingestItem(payload);
-        setState(s => ({ ...s, isProcessing: false, lastResult: 'success' }));
-      } else {
-        throw new Error('Offline');
-      }
-    } catch {
-      // Queue for later
+    if (!navigator.onLine) {
       await addToQueue({ url, title, text });
+      window.dispatchEvent(new Event('queue-updated'));
       setState(s => ({ ...s, isProcessing: false, lastResult: 'success', queuedCount: s.queuedCount + 1 }));
+    } else {
+      try {
+        const result = await ingestItem(payload);
+        if (!result.success || !result.item) throw new Error(result.error || 'The server did not confirm the save.');
+        setState(s => ({ ...s, isProcessing: false, lastResult: 'success' }));
+      } catch (error) {
+        if (error instanceof TypeError) {
+          await addToQueue({ url, title, text });
+          window.dispatchEvent(new Event('queue-updated'));
+          setState(s => ({ ...s, isProcessing: false, lastResult: 'success', queuedCount: s.queuedCount + 1 }));
+        } else {
+          setState(s => ({
+            ...s,
+            isProcessing: false,
+            lastResult: 'error',
+            error: error instanceof Error ? error.message : 'Save failed',
+          }));
+          return;
+        }
+      }
     }
 
     // Navigate to home after a moment

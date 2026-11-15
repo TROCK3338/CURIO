@@ -26,7 +26,10 @@ const SearchSchema = z.object({
   dateTo: z.string().datetime().optional(),
   limit: z.coerce.number().min(1).max(100).default(20),
   offset: z.coerce.number().min(0).default(0),
-  semantic: z.coerce.boolean().default(true),
+  semantic: z.preprocess(
+    value => value === 'false' ? false : value === 'true' ? true : value,
+    z.boolean().default(true),
+  ),
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

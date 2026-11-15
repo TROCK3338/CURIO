@@ -1,15 +1,14 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { cn } from '../utils/cn';
 import { Button } from './ui/Button';
-import { Search, Menu, X, Settings, Sparkles, MessageSquare, Home } from 'lucide-react';
+import { Search, Menu, Settings, Sparkles, MessageSquare, Home } from 'lucide-react';
 import { useSettings, useKeyboardShortcuts } from '../hooks/useSettings';
-import { useToast } from './ui/Toast';
+import { useInfoToast } from './ui/Toast';
 
 export function Layout() {
   const location = useLocation();
-  const { settings, syncStatus, updateSettings } = useSettings();
-  const { toast } = useToast();
+  const { syncStatus } = useSettings();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
@@ -24,13 +23,6 @@ export function Layout() {
     window.location.href = path;
     setSidebarOpen(false);
   };
-
-  // Sync status indicator
-  useEffect(() => {
-    if (syncStatus.isSyncing) {
-      toast('Syncing...', { type: 'loading' });
-    }
-  }, [syncStatus.isSyncing, toast]);
 
   const navItems = [
     { path: '/', label: 'Home', icon: Home },
@@ -139,6 +131,7 @@ export function Layout() {
 
 /* Command Palette Component */
 function CommandPalette({ onClose }: { onClose: () => void }) {
+  const infoToast = useInfoToast();
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -160,7 +153,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
 
   const handleAction = (path: string) => {
     if (path === '#share') {
-      toast('Use the share sheet from any app (Instagram, TikTok, Safari, etc.)', { type: 'info', duration: 5000 });
+      infoToast('Use the share sheet from any app (Instagram, TikTok, Safari, etc.)');
     } else {
       window.location.href = path;
     }
@@ -204,5 +197,3 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     </div>
   );
 }
-
-import { useRef } from 'react';

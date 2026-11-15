@@ -105,22 +105,22 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
 /* Helper hooks */
 export function useSuccessToast() {
   const { toast } = useToast();
-  return (title: string, description?: string) => toast({ title, description, type: 'success' });
+  return useCallback((title: string, description?: string) => toast({ title, description, type: 'success' }), [toast]);
 }
 
 export function useErrorToast() {
   const { toast } = useToast();
-  return (title: string, description?: string) => toast({ title, description, type: 'error' });
+  return useCallback((title: string, description?: string) => toast({ title, description, type: 'error' }), [toast]);
 }
 
 export function useInfoToast() {
   const { toast } = useToast();
-  return (title: string, description?: string) => toast({ title, description, type: 'info' });
+  return useCallback((title: string, description?: string) => toast({ title, description, type: 'info' }), [toast]);
 }
 
 export function useLoadingToast() {
   const { toast, dismiss } = useToast();
-  const show = (title: string, description?: string) => toast({ title, description, type: 'loading', duration: 0 });
-  const hide = (id: string) => dismiss(id);
+  const show = useCallback((title: string, description?: string) => toast({ title, description, type: 'loading', duration: 0 }), [toast]);
+  const hide = useCallback((id: string) => dismiss(id), [dismiss]);
   return { show, hide };
 }
