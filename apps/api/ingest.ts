@@ -5,10 +5,11 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
+import { requireAuth, setCorsHeaders } from './lib/auth.js';
 import { getDb, initializeSchema, rowToItem, upsertItem } from './lib/db.js';
 import { processItem, generateEmbedding } from './lib/gemini.js';
-import { detectPlatform, enrichUrl, extractShortcode, quickEntityExtraction } from './lib/extractor.js';
-import type { SavedItem, IngestRequest, IngestResponse, Platform } from './lib/types';
+import { decodeHtmlEntities, detectPlatform, enrichUrl } from './lib/extractor.js';
+import type { SavedItem, IngestResponse, ExtractedEntities } from './lib/types';
 
 // ============================================
 // Request Validation
@@ -21,30 +22,36 @@ const IngestSchema = z.object({
   userNote: z.string().optional(),
 });
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+/** Keep only entities the AI actually filled in (drops empty / placeholder ones). */
+function cleanEntities(entities: ExtractedEntities | undefined): ExtractedEntities {
+  const cleaned: ExtractedEntities = {};
+  for (const [key, value] of Object.entries(entities ?? {})) {
+    if (!value || typeof value !== 'object') continue;
+    const name = (value as { name?: unknown }).name;
+    if (typeof name !== 'string' || !name.trim() || /^detected\s/i.test(name)) continue;
+    cleaned[key] = value;
+  }
+  return cleaned;
+}
 
 // ============================================
 // Handler
 // ============================================
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  setCorsHeaders(req, res, 'POST, OPTIONS');
+
   // CORS preflight
   if (req.method === 'OPTIONS') {
-    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
     return res.status(200).send('');
   }
 
   if (req.method !== 'POST') {
-    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
-  // Set CORS headers for all responses
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+  const userId = await requireAuth(req, res);
+  if (!userId) return;
 
   try {
     // Initialize DB schema on first request (idempotent)
@@ -75,25 +82,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Check if already saved
+    // Check if already saved for this user
     const db = getDb();
     const existing = await db.execute({
-      sql: 'SELECT id FROM items WHERE url = ?',
-      args: [url],
+      sql: `SELECT id, saved_at, enrichment_status, (embedding IS NOT NULL) AS has_embedding
+            FROM items WHERE url = ? AND user_id = ?`,
+      args: [url, userId],
     });
 
+    let existingId: string | null = null;
+    let existingSavedAt: string | null = null;
+
     if (existing.rows.length > 0) {
-      const existingId = existing.rows[0].id as string;
-      const existingItem = await db.execute({
-        sql: 'SELECT * FROM items WHERE id = ?',
-        args: [existingId],
-      });
-      const { embedding: _embedding, ...savedItem } = rowToItem(existingItem.rows[0] as Record<string, unknown>);
-      return res.status(200).json({
-        success: true,
-        item: savedItem,
-        message: 'Already saved',
-      });
+      const row = existing.rows[0];
+      existingId = String(row.id);
+      existingSavedAt = String(row.saved_at);
+
+      const isComplete = row.enrichment_status === 'enriched' && Number(row.has_embedding) === 1;
+      if (isComplete) {
+        const existingItem = await db.execute({
+          sql: 'SELECT * FROM items WHERE id = ? AND user_id = ?',
+          args: [existingId, userId],
+        });
+        const { embedding: _embedding, ...savedItem } = rowToItem(existingItem.rows[0] as Record<string, unknown>);
+        return res.status(200).json({
+          success: true,
+          item: savedItem,
+          message: 'Already saved',
+        });
+      }
+      // Saved earlier but never fully processed (for example while the AI was
+      // unavailable): fall through and finish the job instead of skipping it.
     }
 
     // Detect platform
@@ -102,40 +121,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Enrich metadata from URL (best effort)
     const enriched = await enrichUrl(url, platform);
 
-    // Combine user input with enriched data
-    const combinedNote = [userNote, text, enriched.description].filter(Boolean).join('\n\n');
+    // What the user actually shared (kept separate from the scraped caption)
+    const sharedTitle = title ? decodeHtmlEntities(title).trim() : undefined;
+    let sharedText = text ? decodeHtmlEntities(text).trim() : '';
+    if (sharedText === url || sharedText === enriched.description) sharedText = '';
+    const userProvidedNote = [userNote?.trim(), sharedText].filter(Boolean).join('\n\n');
 
-    // Quick regex-based entity extraction (fast fallback)
-    const quickEntities = quickEntityExtraction(combinedNote || url);
+    // Everything the AI gets to read
+    const aiContext = [userProvidedNote, enriched.description].filter(Boolean).join('\n\n');
 
-    // Process with Gemini AI
+    // For Instagram the scraped title is the clean caption; elsewhere prefer the shared title
+    const bestTitle =
+      platform === 'instagram'
+        ? (enriched.title ?? sharedTitle ?? null)
+        : (sharedTitle ?? enriched.title ?? null);
+
+    // Process with AI
     let processed: Awaited<ReturnType<typeof processItem>>;
     try {
-      processed = await processItem(
-        url,
-        platform,
-        title ?? enriched.title ?? null,
-        combinedNote || null,
-      );
+      processed = await processItem(url, platform, bestTitle, aiContext || null);
     } catch (error) {
       console.warn('[Ingest] AI enrichment unavailable; saving link without AI:', error);
       processed = {
-        summary: combinedNote || `Saved ${platform} link`,
+        summary: aiContext || `Saved ${platform} link`,
         tags: [],
         entities: {},
       };
     }
 
-    // Merge entities (AI + quick)
-    const mergedEntities = { ...quickEntities, ...processed.entities };
+    const entities = cleanEntities(processed.entities);
 
     // Generate embedding for semantic search
     const embeddingText = [
-      enriched.title,
-      combinedNote,
+      bestTitle,
+      aiContext,
       processed.summary,
       processed.tags.join(' '),
-      Object.values(mergedEntities).flatMap(e => Object.values(e as Record<string, unknown>)).filter(v => typeof v === 'string').join(' '),
+      Object.values(entities)
+        .flatMap(e => Object.values(e as Record<string, unknown>))
+        .filter(v => typeof v === 'string')
+        .join(' '),
     ].filter(Boolean).join('\n');
 
     let embedding: Float32Array | null = null;
@@ -148,21 +173,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Build item - ensure all optional fields are null not undefined
     const now = new Date().toISOString();
     const item: SavedItem = {
-      id: crypto.randomUUID(),
+      id: existingId ?? crypto.randomUUID(),
+      userId,
       url,
       platform,
-      title: (title ?? enriched.title) ?? null,
-      userNote: combinedNote || null,
+      title: bestTitle,
+      userNote: userProvidedNote || null,
       summary: processed.summary,
       tags: [...new Set([...processed.tags, platform, ...(enriched.tags || [])])],
-      entities: mergedEntities,
+      entities,
       embedding: embedding ? Array.from(embedding) : null,
       mediaUrl: enriched.mediaUrl ?? null,
       thumbnailUrl: enriched.thumbnailUrl ?? null,
-      authorUsername: (enriched.authorUsername ?? extractShortcode(url, platform) ?? null) as string | null,
+      authorUsername: enriched.authorUsername ?? null,
       authorDisplayName: enriched.authorDisplayName ?? null,
       publishedAt: enriched.publishedAt ?? null,
-      savedAt: now,
+      savedAt: existingSavedAt ?? now,
       updatedAt: now,
       enrichmentStatus: embedding ? 'enriched' : 'pending',
       enrichmentError: embedding ? null : 'Saved without semantic enrichment',

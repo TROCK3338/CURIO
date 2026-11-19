@@ -1,10 +1,15 @@
 /**
  * Turso (libSQL) Database Client
- * HTTP-based, works great in Vercel Edge Functions
+ * HTTP-based, works great in Vercel serverless functions
+ *
+ * Vector search uses Turso's built-in vector functions (vector32 /
+ * vector_distance_cos) directly on the `items.embedding` BLOB column.
+ * The old sqlite-vec `vec0` virtual table is not available on Turso, so it
+ * is no longer used.
  */
 
 import { createClient } from '@libsql/client';
-import type { SavedItem, ExtractedEntities } from './types';
+import type { SavedItem } from './types';
 
 // ============================================
 // Client Setup
@@ -32,91 +37,105 @@ export function getDb(): LibSQLDatabase {
 // Schema Initialization
 // ============================================
 
-export async function initializeSchema(): Promise<void> {
-  const db = getDb();
+const SCHEMA_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS items (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'legacy',
+    url TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    title TEXT,
+    user_note TEXT,
+    summary TEXT,
+    tags TEXT,
+    entities TEXT,
+    embedding BLOB,
+    media_url TEXT,
+    thumbnail_url TEXT,
+    author_username TEXT,
+    author_display_name TEXT,
+    published_at TEXT,
+    saved_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    enrichment_status TEXT NOT NULL DEFAULT 'pending',
+    enrichment_error TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_items_platform ON items(platform)`,
+  `CREATE INDEX IF NOT EXISTS idx_items_saved_at ON items(saved_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_items_author ON items(author_username)`,
+  `CREATE INDEX IF NOT EXISTS idx_items_enrichment ON items(enrichment_status)`,
+  `CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'legacy',
+    value TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS clusters (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'legacy',
+    label TEXT NOT NULL,
+    description TEXT NOT NULL,
+    item_count INTEGER NOT NULL DEFAULT 0,
+    tags TEXT NOT NULL DEFAULT '[]',
+    representative_items TEXT NOT NULL DEFAULT '[]',
+    generated_at TEXT NOT NULL
+  )`,
+];
 
-  // Main items table
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS items (
-      id TEXT PRIMARY KEY,
-      url TEXT NOT NULL UNIQUE,
-      platform TEXT NOT NULL,
-      title TEXT,
-      user_note TEXT,
-      summary TEXT,
-      tags TEXT,              -- JSON array
-      entities TEXT,          -- JSON object
-      embedding BLOB,         -- sqlite-vec vector (768 dims)
-      media_url TEXT,
-      thumbnail_url TEXT,
-      author_username TEXT,
-      author_display_name TEXT,
-      published_at TEXT,
-      saved_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      enrichment_status TEXT NOT NULL DEFAULT 'pending',
-      enrichment_error TEXT
-    );
-  `);
-
-  // Indexes for common queries
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_items_platform ON items(platform);`);
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_items_saved_at ON items(saved_at DESC);`);
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_items_author ON items(author_username);`);
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_items_enrichment ON items(enrichment_status);`);
-
-  // Vector search virtual table (sqlite-vec)
-  try {
-    await db.execute(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS items_vec USING vec0(
-        embedding FLOAT[768]
-      );
-    `);
-    console.log('[DB] Vector table ready');
-  } catch (e) {
-    console.warn('[DB] Vector table not available (sqlite-vec may not be loaded):', e);
+async function ensureUserIdColumn(table: 'items' | 'clusters' | 'settings'): Promise<void> {
+  const client = getDb();
+  const info = await client.execute(`PRAGMA table_info(${table})`);
+  const hasUserId = info.rows.some(r => String(r.name) === 'user_id');
+  if (!hasUserId) {
+    await client.execute(`ALTER TABLE ${table} ADD COLUMN user_id TEXT NOT NULL DEFAULT 'legacy'`);
   }
+}
 
-  // Settings table
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
+// Run the setup once per warm function instance instead of on every request.
+let schemaPromise: Promise<void> | null = null;
 
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS clusters (
-      id TEXT PRIMARY KEY,
-      label TEXT NOT NULL,
-      description TEXT NOT NULL,
-      item_count INTEGER NOT NULL DEFAULT 0,
-      tags TEXT NOT NULL DEFAULT '[]',
-      representative_items TEXT NOT NULL DEFAULT '[]',
-      generated_at TEXT NOT NULL
-    );
-  `);
+export function initializeSchema(): Promise<void> {
+  if (!schemaPromise) {
+    schemaPromise = (async () => {
+      const client = getDb();
+      await client.batch(SCHEMA_STATEMENTS, 'write');
+      await ensureUserIdColumn('items');
+      await ensureUserIdColumn('clusters');
+      await ensureUserIdColumn('settings');
+      await client.batch([
+        `CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id, saved_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_clusters_user_id ON clusters(user_id, generated_at DESC)`,
+      ], 'write');
+    })().catch(error => {
+      schemaPromise = null; // allow a retry on the next request
+      throw error;
+    });
+  }
+  return schemaPromise;
 }
 
 // ============================================
 // CRUD Operations
 // ============================================
 
+function embeddingToBlob(embedding: number[] | null): Buffer | null {
+  return embedding ? Buffer.from(new Float32Array(embedding).buffer) : null;
+}
+
 export async function insertItem(item: SavedItem): Promise<void> {
   const db = getDb();
-  const now = new Date().toISOString();
+  const userId = item.userId || 'legacy';
 
   await db.execute({
     sql: `
       INSERT INTO items (
-        id, url, platform, title, user_note, summary, tags, entities,
+        id, user_id, url, platform, title, user_note, summary, tags, entities,
         embedding, media_url, thumbnail_url, author_username,
         author_display_name, published_at, saved_at, updated_at,
         enrichment_status, enrichment_error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     args: [
       item.id,
+      userId,
       item.url,
       item.platform,
       item.title,
@@ -124,7 +143,7 @@ export async function insertItem(item: SavedItem): Promise<void> {
       item.summary,
       JSON.stringify(item.tags),
       JSON.stringify(item.entities),
-      item.embedding ? Buffer.from(new Float32Array(item.embedding).buffer) : null,
+      embeddingToBlob(item.embedding),
       item.mediaUrl,
       item.thumbnailUrl,
       item.authorUsername,
@@ -136,34 +155,22 @@ export async function insertItem(item: SavedItem): Promise<void> {
       item.enrichmentError,
     ],
   });
-
-  if (item.embedding) {
-    try {
-      const row = await db.execute({ sql: 'SELECT rowid FROM items WHERE id = ?', args: [item.id] });
-      const rowId = Number(row.rows[0]?.rowid);
-      await db.execute({
-        sql: `INSERT INTO items_vec (rowid, embedding) VALUES (?, ?)`,
-        args: [rowId, Buffer.from(new Float32Array(item.embedding).buffer)],
-      });
-    } catch (e) {
-      console.warn('[DB] Vector insert failed:', e);
-    }
-  }
 }
 
 export async function upsertItem(item: SavedItem): Promise<void> {
   const db = getDb();
   const now = new Date().toISOString();
+  const userId = item.userId || 'legacy';
 
   await db.execute({
     sql: `
       INSERT INTO items (
-        id, url, platform, title, user_note, summary, tags, entities,
+        id, user_id, url, platform, title, user_note, summary, tags, entities,
         embedding, media_url, thumbnail_url, author_username,
         author_display_name, published_at, saved_at, updated_at,
         enrichment_status, enrichment_error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(url) DO UPDATE SET
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         user_note = excluded.user_note,
         summary = excluded.summary,
@@ -181,6 +188,7 @@ export async function upsertItem(item: SavedItem): Promise<void> {
     `,
     args: [
       item.id,
+      userId,
       item.url,
       item.platform,
       item.title,
@@ -188,7 +196,7 @@ export async function upsertItem(item: SavedItem): Promise<void> {
       item.summary,
       JSON.stringify(item.tags),
       JSON.stringify(item.entities),
-      item.embedding ? Buffer.from(new Float32Array(item.embedding).buffer) : null,
+      embeddingToBlob(item.embedding),
       item.mediaUrl,
       item.thumbnailUrl,
       item.authorUsername,
@@ -200,28 +208,13 @@ export async function upsertItem(item: SavedItem): Promise<void> {
       item.enrichmentError,
     ],
   });
-
-  if (item.embedding) {
-    try {
-      const row = await db.execute({ sql: 'SELECT rowid FROM items WHERE id = ?', args: [item.id] });
-      const rowId = Number(row.rows[0]?.rowid);
-      await db.execute({
-        sql: `INSERT INTO items_vec (rowid, embedding) VALUES (?, ?)
-              ON CONFLICT(rowid) DO UPDATE SET embedding = excluded.embedding`,
-        args: [rowId, Buffer.from(new Float32Array(item.embedding).buffer)],
-      });
-    } catch (e) {
-      console.warn('[DB] Vector upsert failed:', e);
-    }
-  }
 }
 
-export async function getItem(id: string): Promise<SavedItem | null> {
+export async function getItem(id: string, userId?: string): Promise<SavedItem | null> {
   const db = getDb();
-  const result = await db.execute({
-    sql: `SELECT * FROM items WHERE id = ?`,
-    args: [id],
-  });
+  const result = userId
+    ? await db.execute({ sql: `SELECT * FROM items WHERE id = ? AND user_id = ?`, args: [id, userId] })
+    : await db.execute({ sql: `SELECT * FROM items WHERE id = ?`, args: [id] });
 
   if (result.rows.length === 0) return null;
   return rowToItem(result.rows[0]);
@@ -230,6 +223,7 @@ export async function getItem(id: string): Promise<SavedItem | null> {
 export function rowToItem(row: Record<string, unknown>): SavedItem {
   return {
     id: String(row.id),
+    userId: row.user_id ? String(row.user_id) : undefined,
     url: String(row.url),
     platform: row.platform as SavedItem['platform'],
     title: row.title as string | null,
@@ -250,12 +244,11 @@ export function rowToItem(row: Record<string, unknown>): SavedItem {
   };
 }
 
-export async function getItemByUrl(url: string): Promise<SavedItem | null> {
+export async function getItemByUrl(url: string, userId?: string): Promise<SavedItem | null> {
   const db = getDb();
-  const result = await db.execute({
-    sql: `SELECT * FROM items WHERE url = ?`,
-    args: [url],
-  });
+  const result = userId
+    ? await db.execute({ sql: `SELECT * FROM items WHERE url = ? AND user_id = ?`, args: [url, userId] })
+    : await db.execute({ sql: `SELECT * FROM items WHERE url = ?`, args: [url] });
 
   if (result.rows.length === 0) return null;
   return rowToItem(result.rows[0]);
@@ -266,6 +259,7 @@ export async function getItemByUrl(url: string): Promise<SavedItem | null> {
 // ============================================
 
 export interface SearchFilters {
+  userId?: string;
   platform?: string;
   tags?: string[];
   dateFrom?: string;
@@ -273,28 +267,13 @@ export interface SearchFilters {
   enrichmentStatus?: string;
 }
 
-export async function searchItems(
-  query: string,
-  filters: SearchFilters = {},
-  limit = 20,
-  offset = 0
-): Promise<{ items: SavedItem[]; total: number }> {
-  const db = getDb();
-
+function buildFilterConditions(filters: SearchFilters): { conditions: string[]; args: (string | number)[] } {
   const conditions: string[] = [];
   const args: (string | number)[] = [];
 
-  if (query.trim()) {
-    conditions.push(`(
-      title LIKE ? OR
-      user_note LIKE ? OR
-      summary LIKE ? OR
-      tags LIKE ? OR
-      author_username LIKE ? OR
-      author_display_name LIKE ?
-    )`);
-    const likeQuery = `%${query}%`;
-    for (let i = 0; i < 6; i++) args.push(likeQuery);
+  if (filters.userId) {
+    conditions.push(`user_id = ?`);
+    args.push(filters.userId);
   }
 
   if (filters.platform) {
@@ -323,6 +302,32 @@ export async function searchItems(
     args.push(filters.enrichmentStatus);
   }
 
+  return { conditions, args };
+}
+
+export async function searchItems(
+  query: string,
+  filters: SearchFilters = {},
+  limit = 20,
+  offset = 0
+): Promise<{ items: SavedItem[]; total: number }> {
+  const db = getDb();
+
+  const { conditions, args } = buildFilterConditions(filters);
+
+  if (query.trim()) {
+    conditions.unshift(`(
+      title LIKE ? OR
+      user_note LIKE ? OR
+      summary LIKE ? OR
+      tags LIKE ? OR
+      author_username LIKE ? OR
+      author_display_name LIKE ?
+    )`);
+    const likeQuery = `%${query}%`;
+    args.unshift(likeQuery, likeQuery, likeQuery, likeQuery, likeQuery, likeQuery);
+  }
+
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const countResult = await db.execute({
@@ -345,6 +350,12 @@ export async function searchItems(
   return { items, total };
 }
 
+/**
+ * Meaning-based search: ranks saved items by cosine distance between the
+ * query embedding and each item's stored embedding (brute force, which is
+ * perfectly fast for a personal library). Falls back to keyword search if
+ * vector search is unavailable or finds nothing.
+ */
 export async function semanticSearch(
   queryEmbedding: Float32Array,
   filters: SearchFilters = {},
@@ -354,39 +365,23 @@ export async function semanticSearch(
 ): Promise<{ items: SavedItem[]; total: number }> {
   const db = getDb();
 
-  const conditions: string[] = [];
-  const args: (string | number)[] = [];
+  const { conditions, args } = buildFilterConditions(filters);
+  conditions.unshift('embedding IS NOT NULL');
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
-  if (filters.platform) {
-    conditions.push(`i.platform = ?`);
-    args.push(filters.platform);
-  }
-
-  if (filters.dateFrom) {
-    conditions.push(`i.saved_at >= ?`);
-    args.push(filters.dateFrom);
-  }
-
-  if (filters.dateTo) {
-    conditions.push(`i.saved_at <= ?`);
-    args.push(filters.dateTo);
-  }
-
-  const whereClause = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
+  // vector32() takes a JSON array of numbers and builds the vector for us.
+  const queryVector = `[${Array.from(queryEmbedding).join(',')}]`;
 
   try {
     const result = await db.execute({
       sql: `
-        SELECT
-          i.*,
-          vec_distance_cosine(v.embedding, ?) as distance
-        FROM items_vec v
-        JOIN items i ON i.rowid = v.rowid
-        WHERE 1=1 ${whereClause}
+        SELECT *, vector_distance_cos(embedding, vector32(?)) AS distance
+        FROM items
+        ${whereClause}
         ORDER BY distance ASC
         LIMIT ? OFFSET ?
       `,
-      args: [Buffer.from(queryEmbedding.buffer), ...args, limit, offset],
+      args: [queryVector, ...args, limit, offset],
     });
 
     const items = result.rows.map(rowToItem);
@@ -395,7 +390,7 @@ export async function semanticSearch(
     }
 
     const countResult = await db.execute({
-      sql: `SELECT COUNT(*) as total FROM items_vec v JOIN items i ON i.rowid = v.rowid WHERE 1=1 ${whereClause}`,
+      sql: `SELECT COUNT(*) as total FROM items ${whereClause}`,
       args,
     });
     const total = Number(countResult.rows[0]?.total ?? 0);
@@ -413,6 +408,7 @@ export async function semanticSearch(
 
 export interface ClusterRow {
   id: string;
+  user_id?: string;
   label: string;
   description: string;
   item_count: number;
@@ -421,13 +417,14 @@ export interface ClusterRow {
   generated_at: string;
 }
 
-export async function saveClusters(clusters: ClusterRow[]): Promise<void> {
+export async function saveClusters(clusters: ClusterRow[], userId = 'legacy'): Promise<void> {
   const db = getDb();
   const batch = clusters.map(c => ({
     sql: `
-      INSERT INTO clusters (id, label, description, item_count, tags, representative_items, generated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO clusters (id, user_id, label, description, item_count, tags, representative_items, generated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
+        user_id = excluded.user_id,
         label = excluded.label,
         description = excluded.description,
         item_count = excluded.item_count,
@@ -436,7 +433,8 @@ export async function saveClusters(clusters: ClusterRow[]): Promise<void> {
         generated_at = excluded.generated_at
     `,
     args: [
-      c.id,
+      `${userId}:${c.id}`,
+      userId,
       c.label,
       c.description,
       c.item_count,
@@ -448,12 +446,11 @@ export async function saveClusters(clusters: ClusterRow[]): Promise<void> {
   await db.batch(batch);
 }
 
-export async function getLatestClusters(): Promise<ClusterRow[]> {
+export async function getLatestClusters(userId?: string): Promise<ClusterRow[]> {
   const db = getDb();
-  const result = await db.execute({
-    sql: `SELECT * FROM clusters ORDER BY generated_at DESC LIMIT 20`,
-    args: [],
-  });
+  const result = userId
+    ? await db.execute({ sql: `SELECT * FROM clusters WHERE user_id = ? ORDER BY generated_at DESC LIMIT 20`, args: [userId] })
+    : await db.execute({ sql: `SELECT * FROM clusters ORDER BY generated_at DESC LIMIT 20`, args: [] });
   return result.rows as unknown as ClusterRow[];
 }
 
@@ -468,7 +465,7 @@ export async function getSetting(key: string): Promise<string | null> {
     args: [key],
   });
   const val = result.rows[0]?.value;
-return val != null ? String(val) : null;
+  return val != null ? String(val) : null;
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
@@ -478,7 +475,3 @@ export async function setSetting(key: string, value: string): Promise<void> {
     args: [key, value],
   });
 }
-
-// ============================================
-// Helpers
-// ============================================

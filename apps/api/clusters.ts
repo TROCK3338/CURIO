@@ -4,30 +4,28 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { requireAuth, setCorsHeaders } from './lib/auth.js';
 import { getDb, initializeSchema, getLatestClusters, saveClusters } from './lib/db.js';
 import { generateClusters } from './lib/gemini.js';
 import type { ClusterResponse, SavedItem } from './lib/types';
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+  setCorsHeaders(req, res, 'GET, POST, OPTIONS');
 
   if (req.method === 'OPTIONS') return res.status(200).send('');
+
+  const userId = await requireAuth(req, res);
+  if (!userId) return;
 
   try {
     await initializeSchema();
 
     if (req.method === 'POST') {
-      return await regenerateClusters(req, res);
+      return await regenerateClusters(req, res, userId);
     }
 
-    // GET: Return latest clusters
-    const clusters = await getLatestClusters();
+    // GET: Return latest clusters for this user
+    const clusters = await getLatestClusters(userId);
 
     const formatted = clusters.map(c => ({
       id: c.id,
@@ -51,16 +49,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-async function regenerateClusters(req: VercelRequest, res: VercelResponse) {
+async function regenerateClusters(_req: VercelRequest, res: VercelResponse, userId: string) {
   const db = getDb();
 
   const result = await db.execute({
-    sql: `SELECT * FROM items WHERE enrichment_status = 'enriched' ORDER BY saved_at DESC LIMIT 1000`,
-    args: [],
+    sql: `SELECT * FROM items WHERE user_id = ? AND enrichment_status = 'enriched' ORDER BY saved_at DESC LIMIT 1000`,
+    args: [userId],
   });
 
   const items: SavedItem[] = result.rows.map(row => ({
     id: row.id as string,
+    userId,
     url: row.url as string,
     platform: row.platform as SavedItem['platform'],
     title: row.title as string | null,
@@ -104,7 +103,7 @@ async function regenerateClusters(req: VercelRequest, res: VercelResponse) {
     generated_at: now,
   }));
 
-  await saveClusters(clusterRows);
+  await saveClusters(clusterRows, userId);
 
   return res.status(200).json({
     clusters,

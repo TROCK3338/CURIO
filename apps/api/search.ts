@@ -5,15 +5,10 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
-import { getDb, initializeSchema, searchItems, semanticSearch } from './lib/db.js';
+import { requireAuth, setCorsHeaders } from './lib/auth.js';
+import { initializeSchema, searchItems, semanticSearch } from './lib/db.js';
 import { generateEmbedding } from './lib/gemini.js';
-import type { SearchRequest, SearchResponse, Platform } from './lib/types';
-
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+import type { SearchResponse } from './lib/types';
 
 const SearchSchema = z.object({
   q: z.string().default(''),
@@ -33,14 +28,13 @@ const SearchSchema = z.object({
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  Object.entries({
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  }).forEach(([k, v]) => res.setHeader(k, v));
+  setCorsHeaders(req, res, 'GET, OPTIONS');
 
   if (req.method === 'OPTIONS') return res.status(200).send('');
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+
+  const userId = await requireAuth(req, res);
+  if (!userId) return;
 
   try {
     await initializeSchema();
@@ -56,6 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { q, platform, tags, dateFrom, dateTo, limit, offset, semantic } = parseResult.data;
 
     const filters = {
+      userId,
       platform,
       tags: tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
       dateFrom,

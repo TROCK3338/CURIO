@@ -65,6 +65,7 @@ export function extractUsername(url: string, platform: Platform): string | null 
 
 export interface SavedItem {
   id: string;
+  userId?: string;
   url: string;
   platform: Platform;
   title: string | null;

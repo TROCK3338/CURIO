@@ -5,15 +5,10 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
-import { getDb, initializeSchema, searchItems, semanticSearch } from './lib/db.js';
+import { requireAuth, setCorsHeaders } from './lib/auth.js';
+import { initializeSchema, semanticSearch } from './lib/db.js';
 import { generateEmbedding, chatWithSaves } from './lib/gemini.js';
-import type { ChatRequest, ChatResponse, SavedItem } from './lib/types';
-
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+import type { ChatResponse, SavedItem } from './lib/types';
 
 const ChatSchema = z.object({
   message: z.string().min(1).max(2000),
@@ -30,10 +25,13 @@ const ChatSchema = z.object({
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+  setCorsHeaders(req, res, 'POST, OPTIONS');
 
   if (req.method === 'OPTIONS') return res.status(200).send('');
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const userId = await requireAuth(req, res);
+  if (!userId) return;
 
   try {
     await initializeSchema();
@@ -48,9 +46,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { message, contextLimit, filter } = parseResult.data;
 
-    // Find relevant items using semantic search
+    // Find relevant items using semantic search scoped to this user
     const queryEmbedding = await generateEmbedding(message);
-    const { items } = await semanticSearch(queryEmbedding, filter || {}, contextLimit * 2, 0, message);
+    const { items } = await semanticSearch(queryEmbedding, { ...(filter || {}), userId }, contextLimit * 2, 0, message);
 
     let relevantItems: SavedItem[] = items;
     if (items.length > 0) {

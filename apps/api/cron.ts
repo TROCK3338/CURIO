@@ -11,9 +11,9 @@ import type { SavedItem } from './lib/types';
 const CRON_SECRET = process.env.CRON_SECRET;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Verify cron secret
+  // Fail closed if CRON_SECRET is missing or does not match
   const authHeader = req.headers.authorization;
-  if (CRON_SECRET && authHeader !== `Bearer ${CRON_SECRET}`) {
+  if (!CRON_SECRET || authHeader !== `Bearer ${CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -45,56 +45,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 async function runClusterGeneration() {
   const db = getDb();
 
-  const result = await db.execute({
-    sql: `SELECT * FROM items WHERE enrichment_status = 'enriched' ORDER BY saved_at DESC LIMIT 1000`,
+  const usersResult = await db.execute({
+    sql: `SELECT DISTINCT user_id FROM items WHERE enrichment_status = 'enriched'`,
     args: [],
   });
 
-  const items: SavedItem[] = result.rows.map(row => ({
-    id: row.id as string,
-    url: row.url as string,
-    platform: row.platform as SavedItem['platform'],
-    title: row.title as string | null,
-    userNote: row.user_note as string | null,
-    summary: row.summary as string | null,
-    tags: row.tags ? JSON.parse(row.tags as string) : [],
-    entities: row.entities ? JSON.parse(row.entities as string) : {},
-    embedding: row.embedding ? Array.from(new Float32Array(row.embedding as ArrayBuffer)) : null,
-    mediaUrl: row.media_url as string | null,
-    thumbnailUrl: row.thumbnail_url as string | null,
-    authorUsername: row.author_username as string | null,
-    authorDisplayName: row.author_display_name as string | null,
-    publishedAt: row.published_at as string | null,
-    savedAt: row.saved_at as string,
-    updatedAt: row.updated_at as string,
-    enrichmentStatus: row.enrichment_status as SavedItem['enrichmentStatus'],
-    enrichmentError: row.enrichment_error as string | null,
-  }));
+  for (const userRow of usersResult.rows) {
+    const userId = String(userRow.user_id || 'legacy');
+    const result = await db.execute({
+      sql: `SELECT * FROM items WHERE user_id = ? AND enrichment_status = 'enriched' ORDER BY saved_at DESC LIMIT 1000`,
+      args: [userId],
+    });
 
-  if (items.length < 5) {
-    console.log('[Cron] Not enough items for clustering');
-    return;
+    const items: SavedItem[] = result.rows.map(row => ({
+      id: row.id as string,
+      userId,
+      url: row.url as string,
+      platform: row.platform as SavedItem['platform'],
+      title: row.title as string | null,
+      userNote: row.user_note as string | null,
+      summary: row.summary as string | null,
+      tags: row.tags ? JSON.parse(row.tags as string) : [],
+      entities: row.entities ? JSON.parse(row.entities as string) : {},
+      embedding: row.embedding ? Array.from(new Float32Array(row.embedding as ArrayBuffer)) : null,
+      mediaUrl: row.media_url as string | null,
+      thumbnailUrl: row.thumbnail_url as string | null,
+      authorUsername: row.author_username as string | null,
+      authorDisplayName: row.author_display_name as string | null,
+      publishedAt: row.published_at as string | null,
+      savedAt: row.saved_at as string,
+      updatedAt: row.updated_at as string,
+      enrichmentStatus: row.enrichment_status as SavedItem['enrichmentStatus'],
+      enrichmentError: row.enrichment_error as string | null,
+    }));
+
+    if (items.length < 5) continue;
+
+    const clusters = await generateClusters(items);
+    const now = new Date().toISOString();
+    const clusterRows = clusters.map(c => ({
+      id: c.id,
+      label: c.label,
+      description: c.description,
+      item_count: c.itemIds.length,
+      tags: JSON.stringify(c.tags),
+      representative_items: JSON.stringify(c.itemIds.slice(0, 5).map(id => {
+        const item = items.find(i => i.id === id);
+        return item ? { id: item.id, title: item.title, thumbnailUrl: item.thumbnailUrl, url: item.url } : null;
+      }).filter(Boolean)),
+      generated_at: now,
+    }));
+
+    await saveClusters(clusterRows, userId);
+    console.log(`[Cron] Generated ${clusters.length} clusters for user ${userId}`);
   }
-
-  const clusters = await generateClusters(items);
-
-  const now = new Date().toISOString();
-  const clusterRows = clusters.map(c => ({
-    id: c.id,
-    label: c.label,
-    description: c.description,
-    item_count: c.itemIds.length,
-    tags: JSON.stringify(c.tags),
-    representative_items: JSON.stringify(c.itemIds.slice(0, 5).map(id => {
-      const item = items.find(i => i.id === id);
-      return item ? { id: item.id, title: item.title, thumbnailUrl: item.thumbnailUrl, url: item.url } : null;
-    }).filter(Boolean)),
-    generated_at: now,
-  }));
-
-  await saveClusters(clusterRows);
-
-  console.log(`[Cron] Generated ${clusters.length} clusters`);
 }
 
 async function runCleanup() {

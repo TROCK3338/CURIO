@@ -191,7 +191,7 @@ function ItemCard({ item, viewMode }: { item: any; viewMode: 'timeline' | 'grid'
               'font-medium line-clamp-2 group-hover:text-primary transition-colors',
               viewMode === 'grid' ? 'text-lg' : 'text-base'
             )}>
-              <Link to={`/item/${item.id}`}>{item.title || 'Untitled'}</Link>
+              <Link to={`/item/${item.id}`}>{getItemDisplayTitle(item)}</Link>
             </h3>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -207,11 +207,11 @@ function ItemCard({ item, viewMode }: { item: any; viewMode: 'timeline' | 'grid'
             </DropdownMenu>
           </div>
 
-          {item.summary && (
+          {item.summary && item.platform !== 'instagram' && (
             <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{item.summary}</p>
           )}
 
-          {item.userNote && !item.summary && (
+          {item.userNote && !item.summary && item.platform !== 'instagram' && (
             <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{item.userNote}</p>
           )}
 
@@ -243,4 +243,9 @@ function ItemCard({ item, viewMode }: { item: any; viewMode: 'timeline' | 'grid'
   ) : (
     content
   );
+}
+
+function getItemDisplayTitle(item: any): string {
+  if (item.platform === 'instagram') return 'Instagram Reel';
+  return item.title || `${item.platform || 'Saved'} link`;
 }

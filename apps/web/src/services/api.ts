@@ -7,6 +7,13 @@ import type { SavedItem, SearchResponse, ChatResponse, ClusterResponse, IngestRe
 
 const API_BASE = '/api';
 
+type AuthTokenGetter = () => Promise<string | null>;
+let getAuthToken: AuthTokenGetter | null = null;
+
+export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
+  getAuthToken = getter;
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string, public details?: unknown) {
     super(message);
@@ -15,12 +22,14 @@ class ApiError extends Error {
 }
 
 async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const token = getAuthToken ? await getAuthToken() : null;
   const response = await fetch(`${API_BASE}${endpoint}`, {
+    ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
-    ...options,
   });
 
   if (!response.ok) {

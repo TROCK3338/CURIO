@@ -5,7 +5,6 @@ import { addToQueue, parseShareTargetData, saveItemLocally } from '../services/i
 import { ingestItem } from '../services/api';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { Badge } from '../components/ui/Badge';
 import { cn } from '../utils/cn';
 import { useSuccessToast, useInfoToast } from '../components/ui/Toast';
 
@@ -31,7 +30,9 @@ export function ShareTargetPage() {
     try { validUrl = new URL(normalizedUrl); } catch { throw new Error('The shared content did not contain a valid link.'); }
     if (validUrl.protocol !== 'https:' && validUrl.protocol !== 'http:') throw new Error('Only web links can be saved.');
 
-    const payload = { url: validUrl.toString(), title: parsed.title || undefined, text: parsed.text || undefined };
+    // Instagram includes the Reel caption in shared title/text. CURIO only
+    // needs the canonical URL for this save flow.
+    const payload = { url: validUrl.toString() };
     if (!navigator.onLine) {
       await addToQueue(payload);
       window.dispatchEvent(new Event('queue-updated'));
@@ -179,17 +180,12 @@ export function ShareTargetPage() {
               <CheckCircle className="h-8 w-8 text-green-500" />
             </div>
             <h2 className="text-xl font-bold mb-2">Saved to CURIO!</h2>
-            <p className="text-muted-foreground mb-6">Your content is now organized and searchable</p>
+            <p className="text-muted-foreground mb-6">Your link is saved and ready in CURIO.</p>
 
             {savedItem && (
               <div className="mb-6 p-4 rounded-lg bg-muted/50 text-left">
-                <p className="font-medium truncate">{savedItem.title || 'Untitled'}</p>
+                <p className="font-medium truncate">{savedItem.platform === 'instagram' ? 'Instagram Reel' : `${savedItem.platform} link`}</p>
                 <p className="text-sm text-muted-foreground mt-1">{savedItem.platform}</p>
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {savedItem.tags?.slice(0, 4).map((tag: string) => (
-                    <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                  ))}
-                </div>
               </div>
             )}
 

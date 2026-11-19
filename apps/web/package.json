@@ -10,6 +10,7 @@
     "lint": "eslint src --ext ts,tsx"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.61.12",
     "@mindspace/shared": "*",
     "@radix-ui/react-slot": "^1.5.0",
     "@tanstack/react-query": "^5.24.0",

@@ -1,13 +1,15 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
+import { UserButton } from '@clerk/clerk-react';
 import { cn } from '../utils/cn';
 import { Button } from './ui/Button';
-import { Search, Menu, Settings, Sparkles, MessageSquare, Home } from 'lucide-react';
+import { Search, Menu, Settings, MessageSquare, Home } from 'lucide-react';
 import { useSettings, useKeyboardShortcuts } from '../hooks/useSettings';
 import { useInfoToast } from './ui/Toast';
 
 export function Layout() {
   const location = useLocation();
+  const routerNavigate = useNavigate();
   const { syncStatus } = useSettings();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -20,7 +22,7 @@ export function Layout() {
   });
 
   const navigate = (path: string) => {
-    window.location.href = path;
+    routerNavigate(path);
     setSidebarOpen(false);
   };
 
@@ -53,9 +55,11 @@ export function Layout() {
         <div className="flex h-full flex-col">
           {/* Header */}
           <div className="flex h-16 items-center gap-3 border-b px-4">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Sparkles className="h-5 w-5" />
-            </div>
+            <img
+              src="/icons/icon-72x72.png"
+              alt="CURIO logo"
+              className="h-8 w-8 rounded-lg object-cover"
+            />
             <span className="font-semibold text-lg">CURIO</span>
           </div>
 
@@ -84,8 +88,8 @@ export function Layout() {
             })}
           </nav>
 
-          {/* Sync Status */}
-          <div className="border-t p-3">
+          {/* Sync Status & Account */}
+          <div className="border-t p-3 space-y-3">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>Sync</span>
               <span className={cn(
@@ -97,8 +101,12 @@ export function Layout() {
               </span>
             </div>
             {syncStatus.queuedCount > 0 && (
-              <p className="mt-1 text-xs text-muted-foreground">{syncStatus.queuedCount} queued</p>
+              <p className="text-xs text-muted-foreground">{syncStatus.queuedCount} queued</p>
             )}
+            <div className="flex items-center justify-between pt-2 border-t">
+              <span className="text-xs text-muted-foreground">Account</span>
+              <UserButton />
+            </div>
           </div>
         </div>
       </aside>
@@ -114,6 +122,7 @@ export function Layout() {
           <Button variant="ghost" size="icon" onClick={() => setCommandPaletteOpen(true)} aria-label="Search">
             <Search className="h-5 w-5" />
           </Button>
+          <UserButton />
         </header>
 
         <div className="p-4 lg:p-6 pt-safe pb-safe">

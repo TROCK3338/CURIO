@@ -46,10 +46,6 @@ coverage/
 *.sqlite
 *.sqlite3
 
-# Icons (generated)
-apps/web/public/icons/*.png
-apps/web/public/icons/*.ico
-
 # Misc
 *.pem
 .esh
