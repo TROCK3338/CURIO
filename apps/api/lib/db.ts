@@ -94,10 +94,28 @@ async function ensureItemsTableWithoutGlobalUrlUnique(): Promise<void> {
   try {
     const master = await client.execute(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'`);
     const sql = String(master.rows[0]?.sql || '');
-    if (/url\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(sql) || /UNIQUE\s*\(\s*url\s*\)/i.test(sql)) {
+    let hasGlobalUrlUnique = /\burl\b[^,]*\bUNIQUE\b/i.test(sql) || /UNIQUE\s*\([^)]*\burl\b[^)]*\)/i.test(sql);
+
+    if (!hasGlobalUrlUnique) {
+      const idxList = await client.execute(`PRAGMA index_list(items)`);
+      for (const idx of idxList.rows) {
+        if (Number(idx.unique) !== 1) continue;
+        const idxName = String(idx.name || '');
+        if (!idxName) continue;
+        const idxInfo = await client.execute(`PRAGMA index_info("${idxName.replace(/"/g, '""')}")`);
+        const cols = idxInfo.rows.map(c => String(c.name));
+        if (cols.length === 1 && cols[0] === 'url') {
+          hasGlobalUrlUnique = true;
+          break;
+        }
+      }
+    }
+
+    if (hasGlobalUrlUnique) {
       console.log('[DB] Migrating items table to remove global UNIQUE on url...');
       await client.batch([
-        `CREATE TABLE IF NOT EXISTS items_v2 (
+        `DROP TABLE IF EXISTS items_v2`,
+        `CREATE TABLE items_v2 (
           id TEXT PRIMARY KEY,
           user_id TEXT NOT NULL DEFAULT 'legacy',
           url TEXT NOT NULL,

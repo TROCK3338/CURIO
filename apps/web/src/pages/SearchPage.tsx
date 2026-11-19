@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Search, X, Filter, SlidersHorizontal, Tag, Calendar, Globe, Brain } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Search, X, SlidersHorizontal, Brain, ExternalLink } from 'lucide-react';
 import { useSearch, useInfiniteSearch, useFilters } from '../hooks/useItems';
 import { useSemanticSearch, useSearchSuggestions } from '../hooks/useSemanticSearch';
 import { useSettings } from '../hooks/useSettings';
+import { Thumbnail } from '../components/Thumbnail';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
@@ -115,9 +116,9 @@ export function SearchPage() {
       </div>
 
       {/* Suggestions */}
-      {query.length < 2 && suggestions.length > 0 && (
+      {query.length < 2 && (suggestions.data?.length ?? 0) > 0 && (
         <div className="flex flex-wrap gap-2">
-          {suggestions.slice(0, 8).map(s => (
+          {(suggestions.data || []).slice(0, 8).map(s => (
             <Badge key={s} variant="outline" onClick={() => setQuery(s)} className="cursor-pointer hover:bg-accent">
               {s}
             </Badge>
@@ -255,36 +256,44 @@ export function SearchPage() {
 }
 
 function SearchResultItem({ item }: { item: any }) {
-  const successToast = useSuccessToast();
-
   return (
-    <Card className="group hover:border-primary/50 transition-colors">
+    <Card className="group hover:border-primary/40 hover:shadow-sm transition-all">
       <CardContent className="p-4">
         <div className="flex gap-4">
-          {item.thumbnailUrl && (
-            <a href={item.url} target="_blank" rel="noopener noreferrer" className="relative shrink-0 w-24 h-16 rounded-lg overflow-hidden">
-              <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover group-hover:scale-105 transition-transform" loading="lazy" />
+          <Link to={`/item/${item.id}`} className="relative shrink-0 w-28 h-20 rounded-lg overflow-hidden block">
+            <Thumbnail
+              src={item.thumbnailUrl}
+              alt={item.title || ''}
+              className="h-full w-full"
+              imgClassName="group-hover:scale-105 transition-transform duration-300"
+            >
               <PlatformBadge platform={item.platform} className="absolute bottom-1 left-1" />
-            </a>
-          )}
+            </Thumbnail>
+          </Link>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
-              <h3 className="font-medium line-clamp-1 group-hover:text-primary transition-colors">
-                <a href={item.url} target="_blank" rel="noopener noreferrer">{item.title || 'Untitled'}</a>
+              <h3 className="font-semibold line-clamp-1 group-hover:text-primary transition-colors">
+                <Link to={`/item/${item.id}`}>{item.title || `${item.platform || 'Saved'} link`}</Link>
               </h3>
+              <a
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1 text-muted-foreground hover:text-foreground shrink-0"
+                aria-label="Open original"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </a>
             </div>
             {item.summary && <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{item.summary}</p>}
             <div className="flex flex-wrap gap-1.5 mt-2">
-              {item.tags.slice(0, 6).map(tag => (
-                <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+              {item.tags.slice(0, 5).map((tag: string) => (
+                <Badge key={tag} variant="secondary" className="text-[11px] font-normal">#{tag}</Badge>
               ))}
-              {item.tags.length > 6 && <Badge variant="outline" className="text-xs">+{item.tags.length - 6}</Badge>}
+              {item.tags.length > 5 && <Badge variant="outline" className="text-[11px]">+{item.tags.length - 5}</Badge>}
             </div>
-            <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Avatar src={item.thumbnailUrl} fallback={item.authorUsername?.charAt(0)} size="sm" />
-                {item.authorUsername || item.platform}
-              </span>
+            <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
+              <span className="capitalize font-medium">{item.authorDisplayName || item.authorUsername || item.platform}</span>
               <span>{formatDistanceToNow(new Date(item.savedAt), { addSuffix: true })}</span>
             </div>
           </div>

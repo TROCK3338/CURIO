@@ -143,6 +143,7 @@ export interface IngestResponse {
   success: boolean;
   item?: SavedItem;
   error?: string;
+  message?: string;
 }
 
 export interface SearchRequest {

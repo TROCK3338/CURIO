@@ -256,13 +256,15 @@ function ShareInstructionsPage({ url, setUrl, onSave }: { url: string; setUrl: (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md text-center">
         {/* Logo */}
-        <div className="mx-auto mb-8 w-20 h-20 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center">
-          <Brain className="h-10 w-10 text-primary-foreground" />
-        </div>
+        <img
+          src="/icons/icon-192x192.png"
+          alt="CURIO logo"
+          className="mx-auto mb-6 w-20 h-20 rounded-2xl shadow-md"
+        />
 
         <h1 className="text-3xl font-bold mb-2">Save to CURIO</h1>
         <p className="text-muted-foreground mb-8">
-          iPhone PWAs cannot currently receive items directly from the system share sheet. Use Instagram’s Copy Link, then paste it into CURIO.
+          Paste any Reel, video, or article link below, or use your iOS Share Sheet shortcut.
         </p>
 
         <div className="mb-6 flex gap-2">
@@ -274,7 +276,7 @@ function ShareInstructionsPage({ url, setUrl, onSave }: { url: string; setUrl: (
             placeholder="Paste a Reel or video link"
             value={url}
             onChange={event => setUrl(event.target.value)}
-            className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+            className="min-w-0 flex-1 rounded-lg border bg-card px-3 py-2 text-sm"
           />
           <Button onClick={onSave} disabled={!url.trim()}>Save link</Button>
         </div>

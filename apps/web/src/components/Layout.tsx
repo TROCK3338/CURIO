@@ -112,23 +112,52 @@ export function Layout() {
       </aside>
 
       {/* Main Content */}
-      <main className="lg:pl-64 min-h-screen">
+      <main className="lg:pl-64 min-h-screen pb-24 lg:pb-8">
         {/* Mobile Header */}
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 lg:hidden px-4">
-          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
-            <Menu className="h-6 w-6" />
-          </Button>
-          <div className="flex-1 font-semibold">CURIO</div>
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/90 backdrop-blur-md lg:hidden px-4">
+          <img
+            src="/icons/icon-72x72.png"
+            alt="CURIO logo"
+            className="h-7 w-7 rounded-lg object-cover"
+          />
+          <div className="flex-1 font-semibold tracking-tight">CURIO</div>
           <Button variant="ghost" size="icon" onClick={() => setCommandPaletteOpen(true)} aria-label="Search">
             <Search className="h-5 w-5" />
           </Button>
           <UserButton />
         </header>
 
-        <div className="p-4 lg:p-6 pt-safe pb-safe">
+        <div className="mx-auto max-w-6xl p-4 sm:p-6 pt-safe">
           <Outlet />
         </div>
       </main>
+
+      {/* Mobile Floating Glass Bottom Navigation */}
+      <nav
+        aria-label="Mobile navigation"
+        className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 mx-auto max-w-md rounded-full border border-white/25 dark:border-white/10 bg-card/75 backdrop-blur-xl saturate-150 shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5 dark:ring-white/5 px-2 py-1.5 flex items-center justify-around lg:hidden"
+      >
+        {navItems.map(item => {
+          const Icon = item.icon;
+          const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
+          return (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={cn(
+                'flex flex-col items-center justify-center gap-0.5 rounded-full px-4 py-1.5 text-[11px] font-medium transition-all',
+                isActive
+                  ? 'bg-primary/15 text-primary shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+              aria-current={isActive ? 'page' : undefined}
+            >
+              <Icon className="h-5 w-5" aria-hidden="true" />
+              <span>{item.label}</span>
+            </NavLink>
+          );
+        })}
+      </nav>
 
       {/* Command Palette */}
       {commandPaletteOpen && (
