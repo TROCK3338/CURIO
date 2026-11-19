@@ -26,6 +26,7 @@ export function SearchPage() {
   const [query, setQuery] = useState(searchParams.get('q') || '');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
+  const [tagFilterQuery, setTagFilterQuery] = useState('');
 
   // Filters
   const { filters, toggleTag, setPlatform, setDateRange, clearFilters, hasActiveFilters } = useFilters();
@@ -170,17 +171,21 @@ export function SearchPage() {
                       <input
                         type="text"
                         placeholder="Filter tags..."
+                        value={tagFilterQuery}
+                        onChange={e => setTagFilterQuery(e.target.value)}
                         className="w-full mb-2 px-2 py-1.5 text-sm rounded border bg-background"
                       />
-                      {allTags.map(tag => (
-                        <DropdownMenuCheckboxItem
-                          key={tag}
-                          checked={filters.tags.includes(tag)}
-                          onCheckedChange={checked => toggleTag(tag)}
-                        >
-                          {tag}
-                        </DropdownMenuCheckboxItem>
-                      ))}
+                      {allTags
+                        .filter(tag => tag.toLowerCase().includes(tagFilterQuery.toLowerCase()))
+                        .map(tag => (
+                          <DropdownMenuCheckboxItem
+                            key={tag}
+                            checked={filters.tags.includes(tag)}
+                            onCheckedChange={_checked => toggleTag(tag)}
+                          >
+                            {tag}
+                          </DropdownMenuCheckboxItem>
+                        ))}
                     </div>
                   </DropdownMenuContent>
                 </DropdownMenu>

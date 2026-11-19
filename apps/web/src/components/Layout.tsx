@@ -140,6 +140,7 @@ export function Layout() {
 
 /* Command Palette Component */
 function CommandPalette({ onClose }: { onClose: () => void }) {
+  const navigate = useNavigate();
   const infoToast = useInfoToast();
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -164,7 +165,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     if (path === '#share') {
       infoToast('Use the share sheet from any app (Instagram, TikTok, Safari, etc.)');
     } else {
-      window.location.href = path;
+      navigate(path);
     }
     onClose();
   };

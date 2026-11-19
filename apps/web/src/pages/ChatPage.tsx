@@ -165,7 +165,7 @@ export function ChatPage() {
           </Button>
         </form>
         <p className="text-xs text-muted-foreground text-center mt-2">
-          Powered by your saved content • {settings.preferredModel === 'gemini-1.5-flash' ? 'Gemini 1.5 Flash' : 'Gemini 1.5 Pro'}
+          Powered by your saved content • AI answers based on your library
         </p>
       </div>
     </div>

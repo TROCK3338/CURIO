@@ -111,5 +111,5 @@ async function runCleanup() {
     args: [sevenDaysAgo],
   });
 
-  console.log(`[Cron] Cleaned up ${(result as any).changes ?? 0} failed items`);
+  console.log(`[Cron] Cleaned up ${result.rowsAffected ?? 0} failed items`);
 }

@@ -1,85 +1,61 @@
 /**
  * Prompt Templates
- * Centralized for easy customization
+ * Centralized for easy customization across CURIO
  */
 
 export const PROMPTS = {
-  SYSTEM: `You are MindSpace, an AI that helps users organize and retrieve their saved content.
+  SYSTEM: `You are CURIO, an AI that helps users organize and retrieve their saved content.
 You process content from social media (Instagram, TikTok, X, YouTube, etc.) and the web.
 Be concise, accurate, and helpful. Never hallucinate. If unsure, say so.`,
 
-  SUMMARIZE: (context: string) => `
-${context}
-
----
-Write a 2-3 sentence summary capturing the key insight or value of this content.
+  SUMMARIZE: `Write a 2-3 sentence summary capturing the key insight or value of this content.
 Focus on: what is this about, why might someone save it, what's actionable or memorable.
-Be specific, not generic. No fluff.
-Return ONLY the summary text.`,
+Be specific, not generic. No fluff.`,
 
-  TAG: (context: string) => `
-${context}
-
----
-Return 3-8 relevant tags as a JSON array of strings.
-Tags should be lowercase, singular.
-Preferred vocabulary:
+  TAG: `Analyze the content and return 3-8 relevant tags.
+Tags should be lowercase, singular, from this preferred vocabulary:
 ["design", "ui", "ux", "coding", "programming", "javascript", "react", "python", "ai", "ml", "productivity", "learning", "tutorial", "inspiration", "reference", "recipe", "cooking", "food", "workout", "fitness", "health", "travel", "place", "restaurant", "hotel", "product", "shopping", "tech", "gadget", "book", "article", "video", "podcast", "music", "art", "photography", "business", "finance", "investing", "career", "marketing", "writing", "creative", "minimalism", "organization", "mental-health", "meditation", "science", "space", "history", "philosophy", "psychology", "education", "language", "diy", "craft", "home", "garden", "fashion", "beauty", "style"]
 
-Also include platform tags: ["instagram", "tiktok", "x", "youtube", "reels", "shorts", "tweet", "thread"]
+Also include platform-specific tags: ["instagram", "tiktok", "x", "youtube", "reels", "shorts", "tweet", "thread"]`,
 
-Return ONLY a JSON array. Example: ["design", "ui", "inspiration", "instagram", "reels"]`,
+  ENTITIES: `Extract structured entities from the content. Use this shape:
 
-  ENTITIES: (context: string) => `
-${context}
-
----
-Extract structured entities. Return ONLY valid JSON:
 {
-  "recipe": { "name": "", "ingredients": [], "instructions": [], "cuisine": "", "dietTags": [] },
-  "product": { "name": "", "brand": "", "price": "", "currency": "", "url": "" },
-  "place": { "name": "", "address": "", "lat": 0, "lng": 0, "placeId": "" },
-  "event": { "name": "", "startAt": "", "endAt": "", "location": "" },
-  "workout": { "name": "", "type": "", "duration": "", "equipment": [] }
+  "recipe": { "name": string, "ingredients": string[], "instructions": string[], "cuisine"?: string, "dietTags"?: string[] },
+  "product": { "name": string, "brand"?: string, "price"?: string, "currency"?: string, "url"?: string },
+  "place": { "name": string, "address"?: string },
+  "event": { "name": string, "startAt"?: string, "endAt"?: string, "location"?: string },
+  "workout": { "name": string, "type"?: string, "duration"?: string, "equipment"?: string[] }
 }
 
-Only include entities clearly present. Omit empty ones.`,
+Only include entity keys that are clearly present. If none, use {}.`,
 
-  PROCESS_ITEM: (context: string) => `
+  PROCESS_ITEM: (context: string) => `${PROMPTS.SYSTEM}
+
 ${context}
 
----
 TASKS:
-1. SUMMARY: 2-3 sentences, key insight, actionable value
-2. TAGS: 3-8 lowercase tags from preferred vocabulary + platform tags
-3. ENTITIES: Structured extraction (recipe, product, place, event, workout)
+1. SUMMARY: ${PROMPTS.SUMMARIZE}
+2. TAGS: ${PROMPTS.TAG}
+3. ENTITIES: ${PROMPTS.ENTITIES}
 
-Return ONLY JSON:
-{
-  "summary": "string",
-  "tags": ["tag1", "tag2"],
-  "entities": { "recipe": {...}, "product": {...} }
-}`,
+Return ONLY a JSON object with exactly these keys: "summary" (string), "tags" (array of strings), "entities" (object). No explanation, no markdown.`,
 
-  CHAT: (context: string, question: string) => `
-You are MindSpace, answering questions using ONLY the user's saved content below.
+  CHAT: (context: string) => `You are CURIO, answering questions using ONLY the user's saved content below.
 If the answer isn't in the context, say "I don't have that information in your saves."
-Cite sources by referencing item titles/URLs.
+Cite sources by referencing the item titles/URLs.
 
 CONTEXT:
 ${context}
 
-QUESTION: ${question}
+QUESTION:`,
 
-ANSWER:`,
-
-  CLUSTER: (itemsContext: string) => `
-Analyze these saved items and group them into 5-10 thematic clusters.
+  CLUSTER: (itemsContext: string) => `Analyze these saved items and group them into 3-8 thematic clusters.
 Each line: ID | Title | Summary | Tags
 
 ${itemsContext}
 
-Return ONLY a JSON array:
+Return ONLY a JSON array of clusters, no explanation:
 [
   {
     "id": "cluster-1",
@@ -88,7 +64,8 @@ Return ONLY a JSON array:
     "tags": ["tag1", "tag2"],
     "itemIds": ["item-id-1", "item-id-2"]
   }
-]`,
+]
+Only use item IDs from the list above.`,
 };
 
 export const DEFAULT_CUSTOM_PROMPTS = {

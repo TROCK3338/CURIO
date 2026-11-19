@@ -103,70 +103,7 @@ export function useSemanticSearch(items: SavedItem[] = []) {
 }
 
 /* ============================================
-   Search Suggestions Hook
+   Re-export deduplicated hooks from useItems
    ============================================ */
 
-export function useSearchSuggestions(items: SavedItem[] = []) {
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-
-  useEffect(() => {
-    // Extract unique tags and common terms
-    const tagCounts = new Map<string, number>();
-    const termCounts = new Map<string, number>();
-
-    items.forEach(item => {
-      item.tags.forEach(tag => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1));
-      // Extract meaningful words from titles/notes
-      const words = [...(item.title || ''), ...(item.userNote || ''), ...(item.summary || '')]
-        .join(' ')
-        .toLowerCase()
-        .split(/\W+/)
-        .filter(w => w.length > 3);
-      words.forEach(w => termCounts.set(w, (termCounts.get(w) || 0) + 1));
-    });
-
-    // Top tags + terms
-    const topTags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([t]) => t);
-    const topTerms = [...termCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([t]) => t);
-
-    setSuggestions([...new Set([...topTags, ...topTerms])]);
-  }, [items]);
-
-  return suggestions;
-}
-
-/* ============================================
-   Filter Hook
-   ============================================ */
-
-export function useFilters() {
-  const [filters, setFilters] = useState({
-    platform: '' as string,
-    tags: [] as string[],
-    dateFrom: '' as string,
-    dateTo: '' as string,
-  });
-
-  const toggleTag = useCallback((tag: string) => {
-    setFilters(f => ({
-      ...f,
-      tags: f.tags.includes(tag) ? f.tags.filter(t => t !== tag) : [...f.tags, tag],
-    }));
-  }, []);
-
-  const setPlatform = useCallback((platform: string) => {
-    setFilters(f => ({ ...f, platform: f.platform === platform ? '' : platform }));
-  }, []);
-
-  const setDateRange = useCallback((from: string, to: string) => {
-    setFilters(f => ({ ...f, dateFrom: from, dateTo: to }));
-  }, []);
-
-  const clearFilters = useCallback(() => {
-    setFilters({ platform: '', tags: [], dateFrom: '', dateTo: '' });
-  }, []);
-
-  const hasActiveFilters = filters.platform || filters.tags.length > 0 || filters.dateFrom || filters.dateTo;
-
-  return { filters, setFilters, toggleTag, setPlatform, setDateRange, clearFilters, hasActiveFilters };
-}
+export { useSearchSuggestions, useFilters } from './useItems';

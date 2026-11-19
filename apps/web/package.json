@@ -1,5 +1,5 @@
 {
-  "name": "@mindspace/web",
+  "name": "@curio/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",

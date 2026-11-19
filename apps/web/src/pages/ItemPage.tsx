@@ -123,7 +123,7 @@ export function ItemPage() {
         <CardContent className="p-6 space-y-6">
           {/* Title & Meta */}
           <div>
-            <h1 className="text-2xl font-bold">{item.platform === 'instagram' ? 'Instagram Reel' : item.title || `${item.platform || 'Saved'} link`}</h1>
+            <h1 className="text-2xl font-bold">{item.title || `${item.platform ? item.platform.charAt(0).toUpperCase() + item.platform.slice(1) : 'Saved'} link`}</h1>
             <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Calendar className="h-4 w-4" />
@@ -156,7 +156,7 @@ export function ItemPage() {
           </div>
 
           {/* Summary */}
-          {item.summary && item.platform !== 'instagram' && (
+          {item.summary && (
             <Card className="bg-muted/50">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -171,7 +171,7 @@ export function ItemPage() {
           )}
 
           {/* User Note */}
-          {item.userNote && item.platform !== 'instagram' && (
+          {item.userNote && (
             <Card className="border-primary/20">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -186,7 +186,7 @@ export function ItemPage() {
           )}
 
           {/* Entities */}
-          {item.entities && Object.keys(item.entities).length > 0 && item.platform !== 'instagram' && (
+          {item.entities && Object.keys(item.entities).length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">

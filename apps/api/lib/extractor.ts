@@ -149,11 +149,42 @@ export interface MetaTags {
   [key: string]: string | string[] | undefined;
 }
 
+export function isPrivateOrLoopback(hostname: string): boolean {
+  const lower = hostname.toLowerCase().trim();
+  if (
+    lower === 'localhost' ||
+    lower === '127.0.0.1' ||
+    lower === '0.0.0.0' ||
+    lower === '::1' ||
+    lower === '[::1]' ||
+    lower.endsWith('.local') ||
+    lower.endsWith('.internal')
+  ) {
+    return true;
+  }
+
+  const ipv4Match = lower.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (ipv4Match) {
+    const a = parseInt(ipv4Match[1], 10);
+    const b = parseInt(ipv4Match[2], 10);
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+  }
+
+  return false;
+}
+
 export async function fetchMetaTags(url: string): Promise<MetaTags | null> {
   try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (isPrivateOrLoopback(parsed.hostname)) return null;
+
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; MindSpace/1.0; +https://mindspace.app)',
+        'User-Agent': 'Mozilla/5.0 (compatible; CURIO/1.0; +https://curio-omega-tawny.vercel.app)',
         'Accept': 'text/html,application/xhtml+xml',
       },
       signal: AbortSignal.timeout(8000),
@@ -350,6 +381,21 @@ export function detectPlatform(url: string): Platform {
 export function extractUsername(url: string, platform: Platform): string | null {
   try {
     const pathname = new URL(url).pathname;
+
+    if (platform === 'instagram') {
+      const match = pathname.match(/^\/@?([^/]+)/);
+      if (!match) return null;
+      const firstSegment = match[1];
+      if (['reel', 'reels', 'p', 'tv', 'explore', 'direct', 'stories'].includes(firstSegment)) {
+        if (firstSegment === 'stories') {
+          const storiesMatch = pathname.match(/^\/stories\/([^/]+)/);
+          return storiesMatch ? storiesMatch[1] : null;
+        }
+        return null;
+      }
+      return firstSegment;
+    }
+
     const patterns: Record<Platform, RegExp> = {
       instagram: /^\/@?([^/]+)\//,
       tiktok: /^\/@?([^/]+)\//,

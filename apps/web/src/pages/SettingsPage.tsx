@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSettings } from '../hooks/useSettings';
+import { clearAllItems, saveItemLocally } from '../services/indexeddb';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
@@ -7,7 +9,7 @@ import { Switch } from '../components/ui/Switch';
 import { Label } from '../components/ui/Label';
 import { Separator } from '../components/ui/Separator';
 import { cn } from '../utils/cn';
-import { Brain, Cloud, Moon, Sun, Monitor, Database, Bell, Shield, Trash2, Download, Upload, Loader2 } from 'lucide-react';
+import { Brain, Cloud, Moon, Sun, Monitor, Database, Bell, Shield, Trash2, Download, Upload, Loader2, Github, RotateCcw } from 'lucide-react';
 import { useSuccessToast, useErrorToast } from '../components/ui/Toast';
 
 export function SettingsPage() {
@@ -272,34 +274,12 @@ function AISettings({ settings, updateSettings }: any) {
   return (
     <div className="space-y-6">
       <section className="space-y-4">
-        <h3 className="font-medium">Model</h3>
-        <div className="space-y-3">
-          {['gemini-1.5-flash', 'gemini-1.5-pro'].map(model => (
-            <label
-              key={model}
-              className={cn(
-                'flex items-center justify-between p-4 rounded-lg border cursor-pointer transition-colors',
-                settings.preferredModel === model ? 'border-primary bg-primary/5' : 'hover:bg-accent/50'
-              )}
-            >
-              <div>
-                <p className="font-medium">{model === 'gemini-1.5-flash' ? 'Gemini 1.5 Flash' : 'Gemini 1.5 Pro'}</p>
-                <p className="text-sm text-muted-foreground">
-                  {model === 'gemini-1.5-flash'
-                    ? 'Fast, free tier (1,500 req/day), great for tagging & search'
-                    : 'More capable, stricter limits (50 req/day), better for complex chat'}
-                </p>
-              </div>
-              <input
-                type="radio"
-                name="model"
-                value={model}
-                checked={settings.preferredModel === model}
-                onChange={e => updateSettings({ preferredModel: e.target.value as any })}
-                className="h-4 w-4 text-primary"
-              />
-            </label>
-          ))}
+        <h3 className="font-medium">AI Engine</h3>
+        <div className="p-4 rounded-lg border bg-card">
+          <p className="font-medium">Cloudflare Workers AI</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Server-side Llama 3.1 8B Instruct and BGE Base Embeddings for automated tagging, summarization, entity extraction, and RAG chat.
+          </p>
         </div>
       </section>
 
@@ -332,11 +312,11 @@ function AISettings({ settings, updateSettings }: any) {
       <Separator />
 
       <section className="space-y-4">
-        <h3 className="font-medium">Custom Prompts</h3>
+        <h3 className="font-medium">Prompts</h3>
         <p className="text-sm text-muted-foreground">
-          Override default AI prompts for tagging, summarization, etc. (Advanced)
+          System prompts are managed centrally on the server.
         </p>
-        <Button variant="outline" size="sm">Configure prompts</Button>
+        <Button variant="outline" size="sm" disabled>Managed by server</Button>
       </section>
     </div>
   );
@@ -347,6 +327,46 @@ function AISettings({ settings, updateSettings }: any) {
    ============================================ */
 
 function PrivacySettings({ settings, updateSettings }: any) {
+  const successToast = useSuccessToast();
+  const errorToast = useErrorToast();
+  const queryClient = useQueryClient();
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const items = Array.isArray(data) ? data : data.items;
+      if (!Array.isArray(items)) throw new Error('File does not contain an array of items');
+      let count = 0;
+      for (const item of items) {
+        if (item && item.id && item.url) {
+          await saveItemLocally(item);
+          count++;
+        }
+      }
+      queryClient.invalidateQueries();
+      successToast(`Successfully imported ${count} items`);
+    } catch (err) {
+      errorToast(err instanceof Error ? err.message : 'Invalid backup file');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (confirm('Delete ALL local data and cached items? This cannot be undone.')) {
+      try {
+        await clearAllItems();
+        queryClient.invalidateQueries();
+        successToast('All local data deleted');
+      } catch (err) {
+        errorToast('Failed to delete data');
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       <section className="space-y-4">
@@ -354,7 +374,7 @@ function PrivacySettings({ settings, updateSettings }: any) {
 
         <SettingRow
           label="Anonymous analytics"
-          description="Help improve MindSpace with usage data (no personal info)"
+          description="Help improve CURIO with usage data (no personal info)"
         >
           <Switch
             checked={settings.analyticsEnabled}
@@ -386,7 +406,13 @@ function PrivacySettings({ settings, updateSettings }: any) {
             <Upload className="h-4 w-4 mr-2" />
             Import Data
           </Button>
-          <input id="import-file" type="file" accept=".json" className="hidden" />
+          <input
+            id="import-file"
+            type="file"
+            accept=".json"
+            onChange={handleImport}
+            className="hidden"
+          />
         </div>
       </section>
 
@@ -399,7 +425,7 @@ function PrivacySettings({ settings, updateSettings }: any) {
             This will permanently delete all your saved items, settings, and local data.
             This action cannot be undone.
           </p>
-          <Button variant="destructive" onClick={() => { if (confirm('Delete ALL data? This cannot be undone.')) { /* TODO: implement */ } }}>
+          <Button variant="destructive" onClick={handleDeleteAll}>
             <Trash2 className="h-4 w-4 mr-2" />
             Delete All Data
           </Button>
@@ -463,7 +489,6 @@ function LinkRow({ icon, label, href }: { icon: React.ReactNode; label: string; 
   );
 }
 
-import { Github, RotateCcw } from 'lucide-react';
 
 /* ============================================
    UI Helpers

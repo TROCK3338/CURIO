@@ -458,20 +458,23 @@ export async function getLatestClusters(userId?: string): Promise<ClusterRow[]> 
 // Settings
 // ============================================
 
-export async function getSetting(key: string): Promise<string | null> {
+export async function getSetting(key: string, userId: string = 'legacy'): Promise<string | null> {
   const db = getDb();
+  const compositeKey = `${userId}:${key}`;
   const result = await db.execute({
-    sql: `SELECT value FROM settings WHERE key = ?`,
-    args: [key],
+    sql: `SELECT value FROM settings WHERE (key = ? AND user_id = ?) OR key = ? OR (key = ? AND user_id = 'legacy') LIMIT 1`,
+    args: [key, userId, compositeKey, key],
   });
   const val = result.rows[0]?.value;
   return val != null ? String(val) : null;
 }
 
-export async function setSetting(key: string, value: string): Promise<void> {
+export async function setSetting(key: string, value: string, userId: string = 'legacy'): Promise<void> {
   const db = getDb();
+  const compositeKey = `${userId}:${key}`;
   await db.execute({
-    sql: `INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    args: [key, value],
+    sql: `INSERT INTO settings (key, user_id, value) VALUES (?, ?, ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value, user_id = excluded.user_id`,
+    args: [compositeKey, userId, value],
   });
 }

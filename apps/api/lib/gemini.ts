@@ -12,6 +12,7 @@
  */
 
 import type { SavedItem, ExtractedEntities, Platform } from './types';
+import { PROMPTS } from './prompts.js';
 
 // ============================================
 // Configuration
@@ -36,45 +37,6 @@ function getCredentials(): { accountId: string; apiToken: string } {
   }
   return { accountId, apiToken };
 }
-
-// ============================================
-// Prompt Templates
-// ============================================
-
-const SYSTEM_PROMPT = `You are CURIO, an AI that helps users organize and retrieve their saved content.
-You process content from social media (Instagram, TikTok, X, YouTube, etc.) and the web.
-Be concise, accurate, and helpful. Never hallucinate. If unsure, say so.`;
-
-const TAGGING_PROMPT = `Analyze the content and return 3-8 relevant tags.
-Tags should be lowercase, singular, from this preferred vocabulary:
-["design", "ui", "ux", "coding", "programming", "javascript", "react", "python", "ai", "ml", "productivity", "learning", "tutorial", "inspiration", "reference", "recipe", "cooking", "food", "workout", "fitness", "health", "travel", "place", "restaurant", "hotel", "product", "shopping", "tech", "gadget", "book", "article", "video", "podcast", "music", "art", "photography", "business", "finance", "investing", "career", "marketing", "writing", "creative", "minimalism", "organization", "mental-health", "meditation", "science", "space", "history", "philosophy", "psychology", "education", "language", "diy", "craft", "home", "garden", "fashion", "beauty", "style"]
-
-Also include platform-specific tags: ["instagram", "tiktok", "x", "youtube", "reels", "shorts", "tweet", "thread"]`;
-
-const SUMMARY_PROMPT = `Write a 2-3 sentence summary capturing the key insight or value of this content.
-Focus on: what is this about, why might someone save it, what's actionable or memorable.
-Be specific, not generic. No fluff.`;
-
-const ENTITY_EXTRACTION_PROMPT = `Extract structured entities from the content. Use this shape:
-
-{
-  "recipe": { "name": string, "ingredients": string[], "instructions": string[], "cuisine"?: string, "dietTags"?: string[] },
-  "product": { "name": string, "brand"?: string, "price"?: string, "currency"?: string, "url"?: string },
-  "place": { "name": string, "address"?: string },
-  "event": { "name": string, "startAt"?: string, "endAt"?: string, "location"?: string },
-  "workout": { "name": string, "type"?: string, "duration"?: string, "equipment"?: string[] }
-}
-
-Only include entity keys that are clearly present. If none, use {}.`;
-
-const CHAT_PROMPT = (context: string) => `You are CURIO, answering questions using ONLY the user's saved content below.
-If the answer isn't in the context, say "I don't have that information in your saves."
-Cite sources by referencing the item titles/URLs.
-
-CONTEXT:
-${context}
-
-QUESTION:`;
 
 // ============================================
 // Low-level Cloudflare REST helpers
@@ -121,7 +83,7 @@ async function generateText(
 ): Promise<string> {
   const result = await runModel<{ response?: unknown }>(TEXT_MODEL, {
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: PROMPTS.SYSTEM },
       { role: 'user', content: userPrompt },
     ],
     max_tokens: options.maxTokens ?? 1024,
@@ -192,17 +154,7 @@ export async function processItem(
     mediaContext ? `Media Analysis: ${mediaContext.slice(0, MAX_NOTE_CHARS)}` : null,
   ].filter(Boolean);
 
-  const prompt = `
-${contextParts.join('\n')}
-
----
-TASKS:
-1. SUMMARY: ${SUMMARY_PROMPT}
-2. TAGS: ${TAGGING_PROMPT}
-3. ENTITIES: ${ENTITY_EXTRACTION_PROMPT}
-
-Return ONLY a JSON object with exactly these keys: "summary" (string), "tags" (array of strings), "entities" (object). No explanation, no markdown.
-`;
+  const prompt = PROMPTS.PROCESS_ITEM(contextParts.join('\n'));
 
   try {
     const response = await generateText(prompt, { maxTokens: 1024, temperature: 0.2 });
@@ -260,7 +212,7 @@ Tags: ${item.tags.join(', ')}
     usedItems.push(item);
   }
 
-  const prompt = CHAT_PROMPT(context) + question;
+  const prompt = PROMPTS.CHAT(context) + question;
 
   try {
     const answer = (await generateText(prompt, { maxTokens: 1024, temperature: 0.3 })).trim();
@@ -268,8 +220,11 @@ Tags: ${item.tags.join(', ')}
 
     const citations = usedItems
       .filter(item => {
-        const titleStart = item.title?.toLowerCase().slice(0, 20).trim();
-        return (titleStart && lowerAnswer.includes(titleStart)) || lowerAnswer.includes(item.url.toLowerCase());
+        const rawTitle = item.title?.toLowerCase().trim();
+        const titleMatch = rawTitle && rawTitle.length >= 10 ? rawTitle.slice(0, Math.min(rawTitle.length, 40)) : null;
+        const matchesTitle = titleMatch ? lowerAnswer.includes(titleMatch) : false;
+        const matchesUrl = item.url ? lowerAnswer.includes(item.url.toLowerCase()) : false;
+        return matchesTitle || matchesUrl;
       })
       .map((item, i) => ({
         itemId: item.id,
@@ -314,24 +269,7 @@ export async function generateClusters(items: SavedItem[]): Promise<Cluster[]> {
     )
     .join('\n');
 
-  const prompt = `
-Analyze these saved items and group them into 3-8 thematic clusters.
-Each line: ID | Title | Summary | Tags
-
-${context}
-
-Return ONLY a JSON array of clusters, no explanation:
-[
-  {
-    "id": "cluster-1",
-    "label": "Short Label",
-    "description": "One sentence describing this cluster",
-    "tags": ["tag1", "tag2"],
-    "itemIds": ["item-id-1", "item-id-2"]
-  }
-]
-Only use item IDs from the list above.
-`;
+  const prompt = PROMPTS.CLUSTER(context);
 
   try {
     const response = await generateText(prompt, { maxTokens: 2048, temperature: 0.3 });

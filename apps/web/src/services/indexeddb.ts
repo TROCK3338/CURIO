@@ -6,13 +6,13 @@
 import Dexie, { type Table } from 'dexie';
 import type { SavedItem, OfflineQueueItem, UserSettings, ShareTargetData } from '@mindspace/shared';
 
-class MindSpaceDB extends Dexie {
+class CurioDB extends Dexie {
   items!: Table<SavedItem, string>;
   queue!: Table<OfflineQueueItem, string>;
   settings!: Table<UserSettings, string>;
 
   constructor() {
-    super('MindSpaceDB');
+    super('CurioDB');
     this.version(1).stores({
       items: 'id, url, platform, savedAt, *tags, authorUsername',
       queue: 'id, createdAt, status, retries',
@@ -29,7 +29,7 @@ class MindSpaceDB extends Dexie {
   }
 }
 
-export const db = new MindSpaceDB();
+export const db = new CurioDB();
 
 /* ============================================
    Items Operations
@@ -136,16 +136,18 @@ export const DEFAULT_SETTINGS: UserSettings = {
 
 export async function getSettings(): Promise<UserSettings> {
   const stored = await db.settings.get('user');
-  return stored ? { ...DEFAULT_SETTINGS, ...stored } : DEFAULT_SETTINGS;
+  if (!stored) return DEFAULT_SETTINGS;
+  const { key: _key, ...rest } = stored as any;
+  return { ...DEFAULT_SETTINGS, ...rest };
 }
 
 export async function saveSettings(settings: Partial<UserSettings>): Promise<void> {
   const current = await getSettings();
-  await db.settings.put({ ...current, ...settings });
+  await db.settings.put({ ...current, ...settings, key: 'user' } as any);
 }
 
 export async function resetSettings(): Promise<void> {
-  await db.settings.put(DEFAULT_SETTINGS);
+  await db.settings.put({ ...DEFAULT_SETTINGS, key: 'user' } as any);
 }
 
 /* ============================================

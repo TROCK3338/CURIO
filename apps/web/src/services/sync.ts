@@ -32,7 +32,7 @@ export async function initializeSync(settings: UserSettings): Promise<void> {
 
   // Register background sync for when app is closed
   if ('serviceWorker' in navigator && 'sync' in window.ServiceWorkerRegistration.prototype) {
-    await registerBackgroundSync('mindspace-sync');
+    await registerBackgroundSync('curio-sync');
   }
 
   // Listen for online/offline events

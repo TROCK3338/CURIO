@@ -207,11 +207,11 @@ function ItemCard({ item, viewMode }: { item: any; viewMode: 'timeline' | 'grid'
             </DropdownMenu>
           </div>
 
-          {item.summary && item.platform !== 'instagram' && (
+          {item.summary && (
             <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{item.summary}</p>
           )}
 
-          {item.userNote && !item.summary && item.platform !== 'instagram' && (
+          {item.userNote && !item.summary && (
             <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{item.userNote}</p>
           )}
 
@@ -246,6 +246,5 @@ function ItemCard({ item, viewMode }: { item: any; viewMode: 'timeline' | 'grid'
 }
 
 function getItemDisplayTitle(item: any): string {
-  if (item.platform === 'instagram') return 'Instagram Reel';
-  return item.title || `${item.platform || 'Saved'} link`;
+  return item.title || `${item.platform ? item.platform.charAt(0).toUpperCase() + item.platform.slice(1) : 'Saved'} link`;
 }
