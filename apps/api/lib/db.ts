@@ -89,6 +89,77 @@ async function ensureUserIdColumn(table: 'items' | 'clusters' | 'settings'): Pro
   }
 }
 
+async function ensureItemsTableWithoutGlobalUrlUnique(): Promise<void> {
+  const client = getDb();
+  try {
+    const master = await client.execute(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'`);
+    const sql = String(master.rows[0]?.sql || '');
+    if (/url\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(sql) || /UNIQUE\s*\(\s*url\s*\)/i.test(sql)) {
+      console.log('[DB] Migrating items table to remove global UNIQUE on url...');
+      await client.batch([
+        `CREATE TABLE IF NOT EXISTS items_v2 (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL DEFAULT 'legacy',
+          url TEXT NOT NULL,
+          platform TEXT NOT NULL,
+          title TEXT,
+          user_note TEXT,
+          summary TEXT,
+          tags TEXT,
+          entities TEXT,
+          embedding BLOB,
+          media_url TEXT,
+          thumbnail_url TEXT,
+          author_username TEXT,
+          author_display_name TEXT,
+          published_at TEXT,
+          saved_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          enrichment_status TEXT NOT NULL DEFAULT 'pending',
+          enrichment_error TEXT
+        )`,
+        `INSERT OR REPLACE INTO items_v2 SELECT 
+          id, 
+          COALESCE(user_id, 'legacy'), 
+          url, platform, title, user_note, summary, tags, entities, 
+          embedding, media_url, thumbnail_url, author_username, 
+          author_display_name, published_at, saved_at, updated_at, 
+          enrichment_status, enrichment_error 
+        FROM items`,
+        `DROP TABLE items`,
+        `ALTER TABLE items_v2 RENAME TO items`,
+        `CREATE INDEX IF NOT EXISTS idx_items_platform ON items(platform)`,
+        `CREATE INDEX IF NOT EXISTS idx_items_saved_at ON items(saved_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_items_author ON items(author_username)`,
+        `CREATE INDEX IF NOT EXISTS idx_items_enrichment ON items(enrichment_status)`,
+        `CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id, saved_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_items_user_url ON items(user_id, url)`,
+      ], 'write');
+      console.log('[DB] Migration complete: items table now supports multi-user saves per url');
+    }
+  } catch (err) {
+    console.warn('[DB] Migration check/execution warning:', err);
+  }
+
+  // Also drop any standalone unique indexes on items(url)
+  try {
+    const indexes = await client.execute(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items'`);
+    for (const row of indexes.rows) {
+      const idxSql = String(row.sql || '');
+      const idxName = String(row.name || '');
+      if (idxSql && /UNIQUE/i.test(idxSql) && /url/i.test(idxSql) && !/user_id/i.test(idxSql)) {
+        try {
+          await client.execute(`DROP INDEX IF EXISTS "${idxName}"`);
+        } catch (e) {
+          console.warn(`[DB] Could not drop index ${idxName}:`, e);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[DB] Index cleanup warning:', err);
+  }
+}
+
 // Run the setup once per warm function instance instead of on every request.
 let schemaPromise: Promise<void> | null = null;
 
@@ -100,9 +171,11 @@ export function initializeSchema(): Promise<void> {
       await ensureUserIdColumn('items');
       await ensureUserIdColumn('clusters');
       await ensureUserIdColumn('settings');
+      await ensureItemsTableWithoutGlobalUrlUnique();
       await client.batch([
         `CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id, saved_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_clusters_user_id ON clusters(user_id, generated_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_items_user_url ON items(user_id, url)`,
       ], 'write');
     })().catch(error => {
       schemaPromise = null; // allow a retry on the next request
@@ -162,52 +235,99 @@ export async function upsertItem(item: SavedItem): Promise<void> {
   const now = new Date().toISOString();
   const userId = item.userId || 'legacy';
 
-  await db.execute({
-    sql: `
-      INSERT INTO items (
-        id, user_id, url, platform, title, user_note, summary, tags, entities,
-        embedding, media_url, thumbnail_url, author_username,
-        author_display_name, published_at, saved_at, updated_at,
-        enrichment_status, enrichment_error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        title = excluded.title,
-        user_note = excluded.user_note,
-        summary = excluded.summary,
-        tags = excluded.tags,
-        entities = excluded.entities,
-        embedding = excluded.embedding,
-        media_url = excluded.media_url,
-        thumbnail_url = excluded.thumbnail_url,
-        author_username = excluded.author_username,
-        author_display_name = excluded.author_display_name,
-        published_at = excluded.published_at,
-        updated_at = excluded.updated_at,
-        enrichment_status = excluded.enrichment_status,
-        enrichment_error = excluded.enrichment_error
-    `,
-    args: [
-      item.id,
-      userId,
-      item.url,
-      item.platform,
-      item.title,
-      item.userNote,
-      item.summary,
-      JSON.stringify(item.tags),
-      JSON.stringify(item.entities),
-      embeddingToBlob(item.embedding),
-      item.mediaUrl,
-      item.thumbnailUrl,
-      item.authorUsername,
-      item.authorDisplayName,
-      item.publishedAt,
-      item.savedAt,
-      now,
-      item.enrichmentStatus,
-      item.enrichmentError,
-    ],
-  });
+  try {
+    await db.execute({
+      sql: `
+        INSERT INTO items (
+          id, user_id, url, platform, title, user_note, summary, tags, entities,
+          embedding, media_url, thumbnail_url, author_username,
+          author_display_name, published_at, saved_at, updated_at,
+          enrichment_status, enrichment_error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          title = excluded.title,
+          user_note = excluded.user_note,
+          summary = excluded.summary,
+          tags = excluded.tags,
+          entities = excluded.entities,
+          embedding = excluded.embedding,
+          media_url = excluded.media_url,
+          thumbnail_url = excluded.thumbnail_url,
+          author_username = excluded.author_username,
+          author_display_name = excluded.author_display_name,
+          published_at = excluded.published_at,
+          updated_at = excluded.updated_at,
+          enrichment_status = excluded.enrichment_status,
+          enrichment_error = excluded.enrichment_error
+      `,
+      args: [
+        item.id,
+        userId,
+        item.url,
+        item.platform,
+        item.title,
+        item.userNote,
+        item.summary,
+        JSON.stringify(item.tags),
+        JSON.stringify(item.entities),
+        embeddingToBlob(item.embedding),
+        item.mediaUrl,
+        item.thumbnailUrl,
+        item.authorUsername,
+        item.authorDisplayName,
+        item.publishedAt,
+        item.savedAt,
+        now,
+        item.enrichmentStatus,
+        item.enrichmentError,
+      ],
+    });
+  } catch (error: any) {
+    if (String(error?.message || '').includes('UNIQUE constraint failed: items.url')) {
+      console.warn('[DB] Handled items.url constraint conflict; updating existing item by url');
+      await db.execute({
+        sql: `
+          UPDATE items SET
+            user_id = ?,
+            title = ?,
+            user_note = ?,
+            summary = ?,
+            tags = ?,
+            entities = ?,
+            embedding = ?,
+            media_url = ?,
+            thumbnail_url = ?,
+            author_username = ?,
+            author_display_name = ?,
+            published_at = ?,
+            updated_at = ?,
+            enrichment_status = ?,
+            enrichment_error = ?
+          WHERE url = ?
+        `,
+        args: [
+          userId,
+          item.title,
+          item.userNote,
+          item.summary,
+          JSON.stringify(item.tags),
+          JSON.stringify(item.entities),
+          embeddingToBlob(item.embedding),
+          item.mediaUrl,
+          item.thumbnailUrl,
+          item.authorUsername,
+          item.authorDisplayName,
+          item.publishedAt,
+          now,
+          item.enrichmentStatus,
+          item.enrichmentError,
+          item.url,
+        ],
+      });
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function getItem(id: string, userId?: string): Promise<SavedItem | null> {

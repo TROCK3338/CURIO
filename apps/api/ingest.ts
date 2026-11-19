@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from './lib/auth.js';
 import { getDb, initializeSchema, rowToItem, upsertItem } from './lib/db.js';
 import { processItem, generateEmbedding } from './lib/gemini.js';
-import { decodeHtmlEntities, detectPlatform, enrichUrl } from './lib/extractor.js';
+import { decodeHtmlEntities, detectPlatform, enrichUrl, extractShortcode, buildCanonicalUrl } from './lib/extractor.js';
 import type { SavedItem, IngestResponse, ExtractedEntities } from './lib/types';
 
 // ============================================
@@ -82,12 +82,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Check if already saved for this user
+    // Detect platform and canonicalize URL (strip tracking params like ?igsh=...)
+    const platform = detectPlatform(url);
+    const shortcode = extractShortcode(url, platform);
+    const canonicalUrl = shortcode ? buildCanonicalUrl(platform, shortcode) : url;
+
+    // Check if already saved for this user or legacy
     const db = getDb();
     const existing = await db.execute({
-      sql: `SELECT id, saved_at, enrichment_status, (embedding IS NOT NULL) AS has_embedding
-            FROM items WHERE url = ? AND user_id = ?`,
-      args: [url, userId],
+      sql: `SELECT id, user_id, saved_at, enrichment_status, (embedding IS NOT NULL) AS has_embedding
+            FROM items 
+            WHERE (url = ? OR url = ?) AND (user_id = ? OR user_id = 'legacy')
+            ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END LIMIT 1`,
+      args: [canonicalUrl, url, userId, userId],
     });
 
     let existingId: string | null = null;
@@ -98,11 +105,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       existingId = String(row.id);
       existingSavedAt = String(row.saved_at);
 
+      // Claim legacy item for this user if needed
+      if (String(row.user_id) === 'legacy') {
+        await db.execute({
+          sql: 'UPDATE items SET user_id = ? WHERE id = ?',
+          args: [userId, existingId],
+        });
+      }
+
       const isComplete = row.enrichment_status === 'enriched' && Number(row.has_embedding) === 1;
       if (isComplete) {
         const existingItem = await db.execute({
-          sql: 'SELECT * FROM items WHERE id = ? AND user_id = ?',
-          args: [existingId, userId],
+          sql: 'SELECT * FROM items WHERE id = ?',
+          args: [existingId],
         });
         const { embedding: _embedding, ...savedItem } = rowToItem(existingItem.rows[0] as Record<string, unknown>);
         return res.status(200).json({
@@ -111,15 +126,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           message: 'Already saved',
         });
       }
-      // Saved earlier but never fully processed (for example while the AI was
-      // unavailable): fall through and finish the job instead of skipping it.
+      // Saved earlier but never fully processed: fall through and finish the job
     }
 
-    // Detect platform
-    const platform = detectPlatform(url);
-
     // Enrich metadata from URL (best effort)
-    const enriched = await enrichUrl(url, platform);
+    const enriched = await enrichUrl(canonicalUrl, platform);
 
     // What the user actually shared (kept separate from the scraped caption)
     const sharedTitle = title ? decodeHtmlEntities(title).trim() : undefined;
@@ -175,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const item: SavedItem = {
       id: existingId ?? crypto.randomUUID(),
       userId,
-      url,
+      url: canonicalUrl,
       platform,
       title: bestTitle,
       userNote: userProvidedNote || null,

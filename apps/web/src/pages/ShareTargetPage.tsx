@@ -43,7 +43,7 @@ export function ShareTargetPage() {
       const result = await ingestItem(payload);
       if (!result.success || !result.item) throw new Error(result.error || 'The server did not confirm the save.');
       await saveItemLocally(result.item);
-      return { queued: false as const, item: result.item };
+      return { queued: false as const, item: result.item, message: result.message };
     } catch (error) {
       // Only network failures should be queued. A server/API error must be visible
       // so we don't tell the user their link was saved when it was rejected.
@@ -66,7 +66,12 @@ export function ShareTargetPage() {
       } else {
         setSavedItem(outcome.item);
         setState('success');
-        successToast('Saved!', `"${outcome.item.title || 'Link'}" added to CURIO`);
+        const title = outcome.item.title || 'Link';
+        if (outcome.message === 'Already saved') {
+          infoToast('Already in CURIO', `"${title}" is already in your library`);
+        } else {
+          successToast('Saved!', `"${title}" added to CURIO`);
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save';
@@ -107,7 +112,12 @@ export function ShareTargetPage() {
         } else {
           setSavedItem(outcome.item);
           setState('success');
-          successToast('Saved!', `"${outcome.item.title || 'Link'}" added to CURIO`);
+          const itemTitle = outcome.item.title || 'Link';
+          if (outcome.message === 'Already saved') {
+            infoToast('Already in CURIO', `"${itemTitle}" is already in your library`);
+          } else {
+            successToast('Saved!', `"${itemTitle}" added to CURIO`);
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to save';
