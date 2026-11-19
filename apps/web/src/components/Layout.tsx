@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
-import { UserButton } from '@clerk/clerk-react';
+import { UserButton } from '@clerk/react';
 import { cn } from '../utils/cn';
 import { Button } from './ui/Button';
 import { Search, Menu, Settings, MessageSquare, Home } from 'lucide-react';

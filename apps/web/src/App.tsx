@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { SignedIn, SignedOut, SignIn, useAuth } from '@clerk/clerk-react';
+import { SignIn, useAuth } from '@clerk/react';
 import { ToastProvider } from './components/ui/Toast';
 import { Layout } from './components/Layout';
 import { HomePage } from './pages/HomePage';
@@ -13,23 +13,26 @@ import { SettingsPage } from './pages/SettingsPage';
 import { queryClient } from './main';
 import { setAuthTokenGetter } from './services/api';
 
-function AuthBridge() {
-  const { getToken } = useAuth();
+export function App() {
+  const { isLoaded, isSignedIn, getToken } = useAuth();
 
   useEffect(() => {
     setAuthTokenGetter(() => getToken());
     return () => setAuthTokenGetter(null);
   }, [getToken]);
 
-  return null;
-}
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
 
-export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <AuthBridge />
-        <SignedOut>
+        {!isSignedIn ? (
           <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-background">
             <div className="mb-6 flex flex-col items-center gap-3 text-center">
               <img
@@ -46,8 +49,7 @@ export function App() {
             </div>
             <SignIn routing="hash" />
           </div>
-        </SignedOut>
-        <SignedIn>
+        ) : (
           <Routes>
             <Route path="/" element={<Layout />}>
               <Route index element={<HomePage />} />
@@ -60,7 +62,7 @@ export function App() {
             <Route path="share-target" element={<ShareTargetPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </SignedIn>
+        )}
       </ToastProvider>
     </QueryClientProvider>
   );
