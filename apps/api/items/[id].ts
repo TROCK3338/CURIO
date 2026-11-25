@@ -11,7 +11,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from '../lib/auth.js';
 import { deleteItem, getItem, initializeSchema, updateItemFields, updateItemMedia, upsertItem } from '../lib/db.js';
-import { enrichUrl } from '../lib/extractor.js';
+import { decodeHtmlEntities, enrichUrl } from '../lib/extractor.js';
 import { buildEmbeddingText, enrichItem } from '../lib/enrich.js';
 import { generateEmbedding } from '../lib/ai.js';
 import type { SavedItem } from '../lib/types';
@@ -98,8 +98,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (parsed.data.action === 'refresh-media') {
       // Social CDNs expire preview links; re-scrape without spending an AI call.
       const scraped = await enrichUrl(item.url, item.platform);
-      const thumbnailUrl = scraped.thumbnailUrl ?? null;
-      const mediaUrl = scraped.mediaUrl ?? null;
+      // og:image links arrive HTML-encoded ("&amp;"), which breaks signed CDN URLs
+      const thumbnailUrl = scraped.thumbnailUrl ? decodeHtmlEntities(scraped.thumbnailUrl) : null;
+      const mediaUrl = scraped.mediaUrl ? decodeHtmlEntities(scraped.mediaUrl) : null;
       if (thumbnailUrl || mediaUrl) await updateItemMedia(id, userId, { thumbnailUrl, mediaUrl });
       return res.status(200).json({
         ...toResponse(item),

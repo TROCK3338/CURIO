@@ -1,10 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SavedItem } from '@curio/shared';
 import { refreshItemMedia } from '../services/api';
 import { saveItemLocally } from '../services/indexeddb';
 import { cn } from '../utils/cn';
 import { hostnameOf, hueFrom, platformMeta } from '../utils/platform';
 import { displayTitle } from '../utils/text';
+
+/** Saves stored before the server fix kept "&amp;" in image links, which breaks signed CDN URLs. */
+function cleanImageUrl(url: string | null | undefined): string | null {
+  return url ? url.replace(/&amp;/g, '&') : null;
+}
 
 /** Items whose preview link we already tried to refresh this session. */
 const refreshAttempted = new Set<string>();
@@ -30,12 +35,18 @@ interface CoverProps {
  * instead of a broken image.
  */
 export function Cover({ item, className, showTitle = true, size = 'md', onImageAvailable, children }: CoverProps) {
-  const [src, setSrc] = useState<string | null>(item.thumbnailUrl ?? null);
+  const [src, setSrc] = useState<string | null>(cleanImageUrl(item.thumbnailUrl));
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  // Only reset when the image actually changes (resetting on mount would hide
+  // an image that already finished loading from cache)
+  const propUrl = useRef(cleanImageUrl(item.thumbnailUrl));
   useEffect(() => {
-    setSrc(item.thumbnailUrl ?? null);
+    const next = cleanImageUrl(item.thumbnailUrl);
+    if (next === propUrl.current) return;
+    propUrl.current = next;
+    setSrc(next);
     setFailed(false);
     setLoaded(false);
   }, [item.id, item.thumbnailUrl]);
@@ -48,8 +59,9 @@ export function Cover({ item, className, showTitle = true, size = 'md', onImageA
     refreshAttempted.add(item.id);
     try {
       const fresh = await refreshItemMedia(item.id);
-      if (fresh.thumbnailUrl && fresh.thumbnailUrl !== src) {
-        setSrc(fresh.thumbnailUrl);
+      const freshUrl = cleanImageUrl(fresh.thumbnailUrl);
+      if (freshUrl && freshUrl !== src) {
+        setSrc(freshUrl);
         setLoaded(false);
         void saveItemLocally(fresh);
         return;
@@ -77,6 +89,10 @@ export function Cover({ item, className, showTitle = true, size = 'md', onImageA
           referrerPolicy="no-referrer"
           loading="lazy"
           decoding="async"
+          ref={el => {
+            // Cached images can finish before React attaches onLoad
+            if (el?.complete && el.naturalWidth > 0) setLoaded(true);
+          }}
           onLoad={() => setLoaded(true)}
           onError={handleError}
           className={cn(

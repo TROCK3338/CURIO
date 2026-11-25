@@ -18,6 +18,9 @@ export function OnboardingPage() {
   const [step, setStep] = useState<Step>(requested && STEPS.includes(requested) ? requested : 'welcome');
   const index = STEPS.indexOf(step);
 
+  // Seen once is enough: never bounce people back here on later visits to "/"
+  useEffect(() => { markOnboarded(); }, []);
+
   const go = (next: Step) => {
     setStep(next);
     setParams(next === 'welcome' ? {} : { step: next }, { replace: true });

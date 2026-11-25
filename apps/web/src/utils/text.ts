@@ -92,7 +92,14 @@ export function displayAuthor(item: ItemLike): string {
   if (titleName) return titleName.trim();
 
   const display = item.authorDisplayName?.trim();
-  if (display && !/^(instagram|tiktok|youtube|x|twitter|reddit)$/i.test(display)) return display;
+  if (display && !/^(instagram|tiktok|youtube|x|twitter|reddit|generic)$/i.test(display)) return display;
+
+  // Web links: the site is the most useful "author"
+  if (item.url && (!item.platform || item.platform === 'generic')) {
+    try {
+      return new URL(item.url).hostname.replace(/^www\./, '').replace(/^(en|m)\./, '');
+    } catch { /* fall through */ }
+  }
 
   return capitalize(item.platform || 'saved');
 }

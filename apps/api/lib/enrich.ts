@@ -80,6 +80,9 @@ export async function enrichItem(input: EnrichInput): Promise<SavedItem & { enri
     ...scraped,
     title: scraped.title ? decodeHtmlEntities(scraped.title).trim() || undefined : scraped.title,
     description: scraped.description ? decodeHtmlEntities(scraped.description).trim() || undefined : scraped.description,
+    // og:image links come HTML-encoded ("&amp;"), which breaks signed CDN URLs
+    thumbnailUrl: scraped.thumbnailUrl ? decodeHtmlEntities(scraped.thumbnailUrl) : scraped.thumbnailUrl,
+    mediaUrl: scraped.mediaUrl ? decodeHtmlEntities(scraped.mediaUrl) : scraped.mediaUrl,
   };
   // Sites like LinkedIn serve their sign-in page to servers; don't summarize that as the content.
   const enriched = isLoginWall(decoded.title, decoded.description)
