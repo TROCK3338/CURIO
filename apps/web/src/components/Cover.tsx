@@ -18,6 +18,8 @@ interface CoverProps {
   showTitle?: boolean;
   /** Size of the generated cover's type */
   size?: 'sm' | 'md' | 'lg';
+  /** Called with false when the cover falls back to the generated design */
+  onImageAvailable?: (available: boolean) => void;
   children?: ReactNode;
 }
 
@@ -27,7 +29,7 @@ interface CoverProps {
  * render a generated cover (colour from the save id, platform mark, title)
  * instead of a broken image.
  */
-export function Cover({ item, className, showTitle = true, size = 'md', children }: CoverProps) {
+export function Cover({ item, className, showTitle = true, size = 'md', onImageAvailable, children }: CoverProps) {
   const [src, setSrc] = useState<string | null>(item.thumbnailUrl ?? null);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -59,6 +61,11 @@ export function Cover({ item, className, showTitle = true, size = 'md', children
   };
 
   const showImage = Boolean(src) && !failed;
+
+  useEffect(() => {
+    onImageAvailable?.(showImage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showImage]);
 
   return (
     <div className={cn('relative overflow-hidden bg-elevated', className)}>
@@ -100,7 +107,8 @@ function GeneratedCover({ item, showTitle, size }: { item: CoverItem; showTitle:
       }}
       aria-hidden="true"
     >
-      <Icon className={cn('text-white/80', size === 'sm' ? 'h-5 w-5' : 'h-7 w-7')} />
+      {/* Larger covers sit under a platform chip, so only small ones need the mark */}
+      {size === 'sm' ? <Icon className="h-5 w-5 text-white/80" /> : <span />}
       {showTitle && (
         <div>
           <p

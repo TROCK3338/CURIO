@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Clock, Share, AlertCircle, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
@@ -64,6 +65,9 @@ export function SaveCard({ item, priority = false }: { item: SavedItem; priority
   const summary = decodeEntities(item.summary) || cleanCaption(item.userNote);
   const tags = topicTags(item.tags).slice(0, 4);
   const collections = Object.keys(cleanEntities(item.entities)).filter(isCollectionType);
+  // Tall covers only when there is a real (portrait) image; generated covers stay compact
+  const [hasImage, setHasImage] = useState(Boolean(item.thumbnailUrl));
+  const tall = hasImage && meta.aspect === 'portrait';
 
   return (
     <article className="overflow-hidden rounded-[26px] border bg-card animate-in">
@@ -71,7 +75,8 @@ export function SaveCard({ item, priority = false }: { item: SavedItem; priority
         <Cover
           item={item}
           size="lg"
-          className={cn(meta.aspect === 'portrait' ? 'aspect-[4/5]' : 'aspect-[16/10]', priority && 'bg-elevated')}
+          onImageAvailable={setHasImage}
+          className={cn(tall ? 'aspect-[4/5]' : 'aspect-[16/10]', priority && 'bg-elevated')}
         >
           <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
             <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-sm', meta.chip)}>

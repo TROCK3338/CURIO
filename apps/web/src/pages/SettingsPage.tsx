@@ -142,11 +142,17 @@ export function SettingsPage() {
 
       <Group>
         <div className="flex items-center gap-3 px-4 py-4">
-          {user?.imageUrl ? (
-            <img src={user.imageUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
-          ) : (
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-elevated"><UserRound className="h-6 w-6" /></span>
-          )}
+          <span className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-elevated text-lg font-bold uppercase">
+            {(user?.firstName || user?.username || '?').charAt(0)}
+            {user?.imageUrl && (
+              <img
+                src={user.imageUrl}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover"
+                onError={e => { e.currentTarget.style.display = 'none'; }}
+              />
+            )}
+          </span>
           <div className="min-w-0 flex-1">
             <p className="truncate font-semibold">{user?.fullName || user?.username || 'Your account'}</p>
             <p className="truncate text-sm text-muted-foreground">{user?.primaryEmailAddress?.emailAddress}</p>

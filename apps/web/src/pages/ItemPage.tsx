@@ -45,6 +45,7 @@ export function ItemPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [heroImage, setHeroImage] = useState(true);
 
   useEffect(() => {
     if (!id) return;
@@ -97,6 +98,7 @@ export function ItemPage() {
   const tags = topicTags(item.tags);
   const note = cleanCaption(item.userNote);
   const summary = decodeEntities(item.summary);
+  const relatedItems = (related.data?.items ?? []).filter(r => r.id !== item.id);
 
   const copyLink = async () => {
     await navigator.clipboard?.writeText(item.url);
@@ -132,7 +134,8 @@ export function ItemPage() {
         <Cover
           item={item}
           size="lg"
-          className={cn('w-full', meta.aspect === 'portrait' ? 'aspect-[4/5] max-h-[72vh]' : 'aspect-[16/10]')}
+          onImageAvailable={setHeroImage}
+          className={cn('w-full', heroImage && meta.aspect === 'portrait' ? 'aspect-[4/5] max-h-[72vh]' : 'aspect-[16/10]')}
         />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-background to-transparent" />
         <div className="absolute inset-x-0 top-0 flex items-center justify-between p-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -233,10 +236,10 @@ export function ItemPage() {
         <section className="space-y-2">
           <h2 className="section-label">More like this</h2>
           {related.isLoading && [0, 1].map(i => <SaveRowSkeleton key={i} />)}
-          {!related.isLoading && (related.data?.items.length ?? 0) === 0 && (
+          {!related.isLoading && relatedItems.length === 0 && (
             <p className="text-sm text-muted-foreground">Nothing similar yet. Related saves show up as your library grows.</p>
           )}
-          {related.data?.items.map(r => <SaveRow key={r.id} item={r} />)}
+          {relatedItems.map(r => <SaveRow key={r.id} item={r} />)}
         </section>
 
         <footer className="space-y-1 border-t pt-4 text-xs text-muted-foreground">
