@@ -5,7 +5,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
-import { searchItems, chatWithSaves, getClusters, regenerateClusters, ingestItem, updateItem, deleteItem, reprocessItem, type SearchParams, type ItemEdits } from '../services/api';
+import { searchItems, chatWithSaves, getClusters, regenerateClusters, ingestItem, updateItem, deleteItem, reprocessItem, getFacets, type SearchParams, type ItemEdits } from '../services/api';
 import { getItemsLocally, saveItemLocally, searchItemsLocally, deleteItemLocally } from '../services/indexeddb';
 import type { SavedItem, SearchResponse, ChatParams, IngestRequest, IngestResponse } from '@curio/shared';
 
@@ -319,4 +319,25 @@ export function useFilters() {
   const hasActiveFilters = filters.platform || filters.tags.length > 0 || filters.dateFrom || filters.dateTo;
 
   return { filters, setFilters, toggleTag, setPlatform, setDateRange, clearFilters, hasActiveFilters };
+}
+
+/* ============================================
+   Library facets, collections, related saves
+   ============================================ */
+
+export function useFacets() {
+  return useQuery({
+    queryKey: [...ITEMS_QUERY_KEY, 'facets'],
+    queryFn: getFacets,
+    staleTime: 1000 * 60 * 2,
+  });
+}
+
+export function useRelatedItems(itemId: string | undefined, limit = 6) {
+  return useQuery({
+    queryKey: [...ITEMS_QUERY_KEY, 'related', itemId, limit],
+    queryFn: () => searchItems({ relatedTo: itemId, limit }),
+    enabled: !!itemId,
+    staleTime: 1000 * 60 * 5,
+  });
 }

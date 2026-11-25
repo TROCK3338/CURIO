@@ -383,6 +383,10 @@ export function rowToItem(row: Record<string, unknown>): SavedItem {
 // Search Operations
 // ============================================
 
+/** Entity kinds the AI extracts; also the "smart collections" the app shows. */
+export const ENTITY_TYPES = ['recipe', 'place', 'product', 'event', 'workout'] as const;
+export type EntityType = typeof ENTITY_TYPES[number];
+
 export interface SearchFilters {
   userId?: string;
   platform?: string;
@@ -390,6 +394,8 @@ export interface SearchFilters {
   dateFrom?: string;
   dateTo?: string;
   enrichmentStatus?: string;
+  entity?: EntityType;
+  excludeId?: string;
 }
 
 function buildFilterConditions(filters: SearchFilters): { conditions: string[]; args: (string | number)[] } {
@@ -428,6 +434,16 @@ function buildFilterConditions(filters: SearchFilters): { conditions: string[]; 
   if (filters.enrichmentStatus) {
     conditions.push(`enrichment_status = ?`);
     args.push(filters.enrichmentStatus);
+  }
+
+  if (filters.entity && (ENTITY_TYPES as readonly string[]).includes(filters.entity)) {
+    // Safe to inline: whitelisted above
+    conditions.push(`json_type(entities, '$.${filters.entity}') = 'object'`);
+  }
+
+  if (filters.excludeId) {
+    conditions.push(`id != ?`);
+    args.push(filters.excludeId);
   }
 
   return { conditions, args };
@@ -529,6 +545,64 @@ export async function semanticSearch(
     console.warn('[DB] Vector search failed, falling back to keyword:', e);
     return searchItems(fallbackQuery, filters, limit, offset);
   }
+}
+
+/** The stored embedding of one of the user's items (for "related saves"). */
+export async function getItemEmbedding(id: string, userId: string): Promise<Float32Array | null> {
+  const result = await getDb().execute({
+    sql: `SELECT embedding FROM items WHERE id = ? AND user_id = ? AND embedding IS NOT NULL`,
+    args: [id, userId],
+  });
+  const blob = result.rows[0]?.embedding as ArrayBuffer | undefined;
+  return blob ? new Float32Array(blob) : null;
+}
+
+export interface LibraryFacets {
+  total: number;
+  platforms: Record<string, number>;
+  entities: Record<EntityType, number>;
+  tags: Array<{ tag: string; count: number }>;
+}
+
+/** Counts that drive the Collections screen and search suggestions. */
+export async function getLibraryFacets(userId: string): Promise<LibraryFacets> {
+  const db = getDb();
+  const entityCounts = ENTITY_TYPES.map(
+    t => `SUM(CASE WHEN json_type(entities, '$.${t}') = 'object' THEN 1 ELSE 0 END) AS ${t}`,
+  ).join(', ');
+
+  const [totals, platforms, tags] = await Promise.all([
+    db.execute({ sql: `SELECT COUNT(*) AS total, ${entityCounts} FROM items WHERE user_id = ?`, args: [userId] }),
+    db.execute({ sql: `SELECT platform, COUNT(*) AS n FROM items WHERE user_id = ? GROUP BY platform ORDER BY n DESC`, args: [userId] }),
+    db.execute({
+      sql: `SELECT j.value AS tag, COUNT(*) AS n
+            FROM items, json_each(items.tags) AS j
+            WHERE items.user_id = ? AND json_valid(items.tags)
+            GROUP BY j.value ORDER BY n DESC LIMIT 40`,
+      args: [userId],
+    }),
+  ]);
+
+  const row = (totals.rows[0] ?? {}) as Record<string, unknown>;
+  return {
+    total: Number(row.total ?? 0),
+    platforms: Object.fromEntries(platforms.rows.map(r => [String(r.platform), Number(r.n)])),
+    entities: Object.fromEntries(ENTITY_TYPES.map(t => [t, Number(row[t] ?? 0)])) as Record<EntityType, number>,
+    tags: tags.rows.map(r => ({ tag: String(r.tag), count: Number(r.n) })),
+  };
+}
+
+/** Updates scraped media fields only (used when a thumbnail link has expired). */
+export async function updateItemMedia(
+  id: string,
+  userId: string,
+  media: { thumbnailUrl: string | null; mediaUrl: string | null },
+): Promise<void> {
+  await getDb().execute({
+    sql: `UPDATE items SET thumbnail_url = COALESCE(?, thumbnail_url), media_url = COALESCE(?, media_url)
+          WHERE id = ? AND user_id = ?`,
+    args: [media.thumbnailUrl, media.mediaUrl, id, userId],
+  });
 }
 
 /** Recently saved, fully enriched items for clustering (no embeddings needed). */

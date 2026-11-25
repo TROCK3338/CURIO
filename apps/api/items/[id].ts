@@ -4,12 +4,14 @@
  *   PATCH  - edit title, note and/or tags  { title?, userNote?, tags? }
  *   DELETE - delete the save
  *   POST   - re-run AI enrichment          { action: "reprocess" }
+ *            re-scrape the preview image    { action: "refresh-media" }
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from '../lib/auth.js';
-import { deleteItem, getItem, initializeSchema, updateItemFields, upsertItem } from '../lib/db.js';
+import { deleteItem, getItem, initializeSchema, updateItemFields, updateItemMedia, upsertItem } from '../lib/db.js';
+import { enrichUrl } from '../lib/extractor.js';
 import { buildEmbeddingText, enrichItem } from '../lib/enrich.js';
 import { generateEmbedding } from '../lib/ai.js';
 import type { SavedItem } from '../lib/types';
@@ -20,7 +22,7 @@ const PatchSchema = z.object({
   tags: z.array(z.string().trim().toLowerCase().min(1).max(40)).max(30).optional(),
 }).strict();
 
-const PostSchema = z.object({ action: z.literal('reprocess') });
+const PostSchema = z.object({ action: z.enum(['reprocess', 'refresh-media']) });
 
 function toResponse(item: SavedItem & { enrichmentAttempts?: number }) {
   const { embedding: _embedding, enrichmentAttempts: _attempts, ...rest } = item;
@@ -90,7 +92,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // POST: reprocess
     const parsed = PostSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: 'Unknown action', available: ['reprocess'] });
+      return res.status(400).json({ error: 'Unknown action', available: ['reprocess', 'refresh-media'] });
+    }
+
+    if (parsed.data.action === 'refresh-media') {
+      // Social CDNs expire preview links; re-scrape without spending an AI call.
+      const scraped = await enrichUrl(item.url, item.platform);
+      const thumbnailUrl = scraped.thumbnailUrl ?? null;
+      const mediaUrl = scraped.mediaUrl ?? null;
+      if (thumbnailUrl || mediaUrl) await updateItemMedia(id, userId, { thumbnailUrl, mediaUrl });
+      return res.status(200).json({
+        ...toResponse(item),
+        thumbnailUrl: thumbnailUrl ?? item.thumbnailUrl,
+        mediaUrl: mediaUrl ?? item.mediaUrl,
+        refreshed: Boolean(thumbnailUrl && thumbnailUrl !== item.thumbnailUrl),
+      });
     }
 
     const reprocessed = await enrichItem({

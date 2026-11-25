@@ -1,508 +1,235 @@
-import { useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
+import { useClerk, useUser } from '@clerk/react';
 import { useQueryClient } from '@tanstack/react-query';
+import {
+  ChevronRight,
+  Download,
+  HardDrive,
+  Loader2,
+  LogOut,
+  Monitor,
+  Moon,
+  RefreshCw,
+  Share2,
+  Smartphone,
+  Sun,
+  Upload,
+  UserRound,
+  type LucideIcon,
+} from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
-import { clearAllItems, saveItemLocally } from '../services/indexeddb';
-import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
+import { downloadExport } from '../services/api';
+import { addToQueue, clearAllItems } from '../services/indexeddb';
+import { triggerManualSync } from '../services/sync';
+import { findUrl } from '../services/save';
+import { Sheet } from '../components/Sheet';
 import { Switch } from '../components/ui/Switch';
-import { Label } from '../components/ui/Label';
-import { Separator } from '../components/ui/Separator';
+import { useErrorToast, useInfoToast, useSuccessToast } from '../components/ui/Toast';
 import { cn } from '../utils/cn';
-import { Brain, Cloud, Moon, Sun, Monitor, Database, Bell, Shield, Trash2, Download, Upload, Loader2, Github, RotateCcw } from 'lucide-react';
-import { useSuccessToast, useErrorToast } from '../components/ui/Toast';
+
+function Group({ title, children, footer }: { title?: string; children: ReactNode; footer?: ReactNode }) {
+  return (
+    <section className="space-y-2">
+      {title && <h2 className="section-label px-1">{title}</h2>}
+      <div className="divide-y overflow-hidden rounded-[22px] border bg-card">{children}</div>
+      {footer && <p className="px-1 text-xs text-muted-foreground">{footer}</p>}
+    </section>
+  );
+}
+
+function Row({
+  icon: Icon, label, hint, right, onClick, to, danger, disabled,
+}: {
+  icon: LucideIcon; label: string; hint?: string; right?: ReactNode; onClick?: () => void; to?: string; danger?: boolean; disabled?: boolean;
+}) {
+  const body = (
+    <>
+      <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-elevated', danger && 'text-destructive')}>
+        <Icon className="h-[18px] w-[18px]" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className={cn('block font-medium', danger && 'text-destructive')}>{label}</span>
+        {hint && <span className="block text-[13px] text-muted-foreground">{hint}</span>}
+      </span>
+      {right ?? ((onClick || to) && <ChevronRight className="h-4 w-4 text-muted-foreground/60" />)}
+    </>
+  );
+  const cls = cn('flex w-full items-center gap-3 px-4 py-3 text-left', (onClick || to) && 'hover:bg-accent/50', disabled && 'pointer-events-none opacity-50');
+  if (to) return <Link to={to} className={cls}>{body}</Link>;
+  if (onClick) return <button type="button" onClick={onClick} className={cls} disabled={disabled}>{body}</button>;
+  return <div className={cls}>{body}</div>;
+}
+
+const THEMES = [
+  { value: 'dark', label: 'Dark', icon: Moon },
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'system', label: 'Auto', icon: Monitor },
+] as const;
 
 export function SettingsPage() {
-  const { settings, updateSettings, reset, manualSync, syncStatus, isLoading } = useSettings();
-  const successToast = useSuccessToast();
-  const errorToast = useErrorToast();
-
-  const [activeTab, setActiveTab] = useState<'general' | 'sync' | 'ai' | 'privacy' | 'about'>('general');
-
-  if (isLoading) {
-    return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
-  }
-
-  return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">Customize your CURIO experience</p>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 bg-muted rounded-lg p-1">
-        {[
-          { id: 'general', label: 'General', icon: <Monitor className="h-4 w-4" /> },
-          { id: 'sync', label: 'Sync', icon: <Cloud className="h-4 w-4" /> },
-          { id: 'ai', label: 'AI', icon: <Brain className="h-4 w-4" /> },
-          { id: 'privacy', label: 'Privacy', icon: <Shield className="h-4 w-4" /> },
-          { id: 'about', label: 'About', icon: <Database className="h-4 w-4" /> },
-        ].map(tab => (
-          <Button
-            key={tab.id}
-            variant={activeTab === tab.id ? 'default' : 'ghost'}
-            size="sm"
-            className="flex-1 gap-2"
-            onClick={() => setActiveTab(tab.id as typeof activeTab)}
-          >
-            {tab.icon} {tab.label}
-          </Button>
-        ))}
-      </div>
-
-      {/* Tab Content */}
-      <Card>
-        <CardContent className="pt-6">
-          {activeTab === 'general' && <GeneralSettings settings={settings} updateSettings={updateSettings} />}
-          {activeTab === 'sync' && <SyncSettings settings={settings} updateSettings={updateSettings} syncStatus={syncStatus} manualSync={manualSync} />}
-          {activeTab === 'ai' && <AISettings settings={settings} updateSettings={updateSettings} />}
-          {activeTab === 'privacy' && <PrivacySettings settings={settings} updateSettings={updateSettings} />}
-          {activeTab === 'about' && <AboutSettings reset={reset} />}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-/* ============================================
-   General Settings
-   ============================================ */
-
-function GeneralSettings({ settings, updateSettings }: { settings: any; updateSettings: any }) {
-  return (
-    <div className="space-y-6">
-      <section className="space-y-4">
-        <h3 className="font-medium">Appearance</h3>
-        <div className="grid gap-4 sm:grid-cols-3">
-          {['light', 'dark', 'system'].map(theme => (
-            <label
-              key={theme}
-              className={cn(
-                'relative cursor-pointer',
-                settings.theme === theme ? 'ring-2 ring-primary' : ''
-              )}
-            >
-              <input
-                type="radio"
-                name="theme"
-                value={theme}
-                checked={settings.theme === theme}
-                onChange={e => updateSettings({ theme: e.target.value as any })}
-                className="sr-only"
-              />
-              <div className="p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors text-center">
-                <ThemeIcon theme={theme} className="mx-auto mb-2 h-8 w-8" />
-                <p className="capitalize font-medium">{theme}</p>
-              </div>
-            </label>
-          ))}
-        </div>
-      </section>
-
-      <Separator />
-
-      <section className="space-y-4">
-        <h3 className="font-medium">Default View</h3>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {['timeline', 'grid', 'map', 'clusters'].map(view => (
-            <label
-              key={view}
-              className={cn(
-                'relative cursor-pointer',
-                settings.defaultView === view ? 'ring-2 ring-primary' : ''
-              )}
-            >
-              <input
-                type="radio"
-                name="defaultView"
-                value={view}
-                checked={settings.defaultView === view}
-                onChange={e => updateSettings({ defaultView: e.target.value as any })}
-                className="sr-only"
-              />
-              <div className="p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors text-center">
-                <ViewIcon view={view} className="mx-auto mb-2 h-8 w-8" />
-                <p className="capitalize font-medium">{view}</p>
-              </div>
-            </label>
-          ))}
-        </div>
-      </section>
-
-      <Separator />
-
-      <section className="space-y-4">
-        <h3 className="font-medium">Display</h3>
-        <div className="space-y-4">
-          <SettingRow
-            label="Items per page"
-            description="Number of items to show per page"
-          >
-            <select
-              value={settings.itemsPerPage}
-              onChange={e => updateSettings({ itemsPerPage: Number(e.target.value) })}
-              className="w-32 rounded-md border bg-background px-2 py-1 text-sm focus:ring-2 focus:ring-primary"
-            >
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-          </SettingRow>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function ThemeIcon({ theme, className }: { theme: string; className?: string }) {
-  switch (theme) {
-    case 'light': return <Sun className={className} />;
-    case 'dark': return <Moon className={className} />;
-    case 'system': return <Monitor className={className} />;
-  }
-}
-
-function ViewIcon({ view, className }: { view: string; className?: string }) {
-  switch (view) {
-    case 'timeline': return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg>;
-    case 'grid': return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>;
-    case 'map': return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" /><line x1="9" y1="3" x2="9" y2="18" /><line x1="15" y1="6" x2="15" y2="21" /></svg>;
-    case 'clusters': return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></svg>;
-  }
-}
-
-/* ============================================
-   Sync Settings
-   ============================================ */
-
-function SyncSettings({ settings, updateSettings, syncStatus, manualSync }: any) {
-  return (
-    <div className="space-y-6">
-      <section className="space-y-4">
-        <h3 className="font-medium">Sync Status</h3>
-        <div className="p-4 rounded-lg bg-muted/50">
-          <div className="flex items-center justify-between mb-2">
-            <span>Status</span>
-            <span className={cn(
-              'flex items-center gap-1.5 rounded-full px-2 py-0.5 text-sm font-medium',
-              syncStatus.isSyncing ? 'bg-primary/10 text-primary' : 'bg-green-500/10 text-green-500'
-            )}>
-              <span className={cn('h-1.5 w-1.5 rounded-full', syncStatus.isSyncing ? 'bg-primary animate-pulse' : 'bg-green-500')} />
-              {syncStatus.isSyncing ? 'Syncing...' : 'Synced'}
-            </span>
-          </div>
-          <div className="text-sm text-muted-foreground">
-            {syncStatus.queuedCount > 0 ? `${syncStatus.queuedCount} items queued` : 'All caught up'}
-          </div>
-        </div>
-
-        <Button
-          onClick={manualSync}
-          disabled={syncStatus.isSyncing || !syncStatus.isOnline}
-          className="w-full"
-        >
-          {syncStatus.isSyncing ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Syncing...
-            </>
-          ) : (
-            <>
-              <Cloud className="h-4 w-4 mr-2" />
-              Sync Now
-            </>
-          )}
-        </Button>
-      </section>
-
-      <Separator />
-
-      <section className="space-y-4">
-        <h3 className="font-medium">Sync Preferences</h3>
-
-        <SettingRow
-          label="Auto-sync"
-          description="Automatically sync in the background"
-        >
-          <Switch
-            checked={settings.syncEnabled}
-            onCheckedChange={checked => updateSettings({ syncEnabled: checked })}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label="Wi-Fi only"
-          description="Only sync when connected to Wi-Fi"
-        >
-          <Switch
-            checked={settings.wifiOnlySync}
-            onCheckedChange={checked => updateSettings({ wifiOnlySync: checked })}
-            disabled={!settings.syncEnabled}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label="Sync interval"
-          description="How often to check for updates"
-        >
-          <select
-            value={settings.syncIntervalMinutes}
-            onChange={e => updateSettings({ syncIntervalMinutes: Number(e.target.value) })}
-            disabled={!settings.syncEnabled}
-            className="w-40 rounded-md border bg-background px-2 py-1 text-sm"
-          >
-            <option value={5}>5 minutes</option>
-            <option value={15}>15 minutes</option>
-            <option value={30}>30 minutes</option>
-            <option value={60}>1 hour</option>
-            <option value={1440}>Daily</option>
-          </select>
-        </SettingRow>
-      </section>
-    </div>
-  );
-}
-
-/* ============================================
-   AI Settings
-   ============================================ */
-
-function AISettings({ settings, updateSettings }: any) {
-  return (
-    <div className="space-y-6">
-      <section className="space-y-4">
-        <h3 className="font-medium">AI Engine</h3>
-        <div className="p-4 rounded-lg border bg-card">
-          <p className="font-medium">Cloudflare Workers AI</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Server-side Llama 3.1 8B Instruct and BGE Base Embeddings for automated tagging, summarization, entity extraction, and RAG chat.
-          </p>
-        </div>
-      </section>
-
-      <Separator />
-
-      <section className="space-y-4">
-        <h3 className="font-medium">Auto-processing</h3>
-
-        <SettingRow
-          label="Auto-tag"
-          description="Automatically generate tags for new saves"
-        >
-          <Switch
-            checked={settings.autoTag}
-            onCheckedChange={checked => updateSettings({ autoTag: checked })}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label="Auto-summarize"
-          description="Generate AI summaries for new saves"
-        >
-          <Switch
-            checked={settings.autoSummarize}
-            onCheckedChange={checked => updateSettings({ autoSummarize: checked })}
-          />
-        </SettingRow>
-      </section>
-
-      <Separator />
-
-      <section className="space-y-4">
-        <h3 className="font-medium">Prompts</h3>
-        <p className="text-sm text-muted-foreground">
-          System prompts are managed centrally on the server.
-        </p>
-        <Button variant="outline" size="sm" disabled>Managed by server</Button>
-      </section>
-    </div>
-  );
-}
-
-/* ============================================
-   Privacy Settings
-   ============================================ */
-
-function PrivacySettings({ settings, updateSettings }: any) {
-  const successToast = useSuccessToast();
-  const errorToast = useErrorToast();
+  const { settings, updateSettings, syncStatus } = useSettings();
+  const { user } = useUser();
+  const clerk = useClerk();
   const queryClient = useQueryClient();
+  const successToast = useSuccessToast();
+  const errorToast = useErrorToast();
+  const infoToast = useInfoToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [exporting, setExporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const installed =
+    window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+
+  const exportAll = async () => {
+    setExporting(true);
+    try {
+      await downloadExport();
+      successToast('Export downloaded');
+    } catch (e) {
+      errorToast('Export failed', e instanceof Error ? e.message : undefined);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      await triggerManualSync();
+      await queryClient.invalidateQueries({ queryKey: ['items'] });
+      successToast('Up to date');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  /** Accepts a CURIO JSON export or any text file of links; each link is queued and saved properly. */
+  const importFile = async (file: File) => {
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
-      const items = Array.isArray(data) ? data : data.items;
-      if (!Array.isArray(items)) throw new Error('File does not contain an array of items');
-      let count = 0;
-      for (const item of items) {
-        if (item && item.id && item.url) {
-          await saveItemLocally(item);
-          count++;
-        }
-      }
-      queryClient.invalidateQueries();
-      successToast(`Successfully imported ${count} items`);
-    } catch (err) {
-      errorToast(err instanceof Error ? err.message : 'Invalid backup file');
-    } finally {
-      e.target.value = '';
-    }
-  };
-
-  const handleDeleteAll = async () => {
-    if (confirm('Delete ALL local data and cached items? This cannot be undone.')) {
+      let urls: string[] = [];
       try {
-        await clearAllItems();
-        queryClient.invalidateQueries();
-        successToast('All local data deleted');
-      } catch (err) {
-        errorToast('Failed to delete data');
+        const data = JSON.parse(text);
+        const list = Array.isArray(data) ? data : data?.items;
+        if (Array.isArray(list)) urls = list.map((i: { url?: unknown }) => (typeof i?.url === 'string' ? i.url : '')).filter(Boolean);
+      } catch {
+        urls = text.split(/\s+/).map(findUrl).filter((u): u is string => !!u);
       }
+      urls = [...new Set(urls)];
+      if (urls.length === 0) throw new Error('No links found in that file');
+      for (const url of urls) await addToQueue({ url });
+      window.dispatchEvent(new Event('queue-updated'));
+      infoToast(`Importing ${urls.length} links`, 'They’ll appear as CURIO reads each one');
+      void triggerManualSync().then(() => queryClient.invalidateQueries({ queryKey: ['items'] }));
+    } catch (e) {
+      errorToast('Import failed', e instanceof Error ? e.message : undefined);
     }
   };
 
+  const clearDevice = async () => {
+    await clearAllItems();
+    await queryClient.invalidateQueries();
+    setConfirmClear(false);
+    successToast('Device cache cleared', 'Your saves are still in your account');
+  };
+
   return (
-    <div className="space-y-6">
-      <section className="space-y-4">
-        <h3 className="font-medium">Data & Analytics</h3>
+    <div className="space-y-7 pt-2">
+      <h1 className="screen-title">Settings</h1>
 
-        <SettingRow
-          label="Anonymous analytics"
-          description="Help improve CURIO with usage data (no personal info)"
-        >
-          <Switch
-            checked={settings.analyticsEnabled}
-            onCheckedChange={checked => updateSettings({ analyticsEnabled: checked })}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label="Crash reporting"
-          description="Automatically send error reports for debugging"
-        >
-          <Switch
-            checked={settings.crashReportingEnabled}
-            onCheckedChange={checked => updateSettings({ crashReportingEnabled: checked })}
-          />
-        </SettingRow>
-      </section>
-
-      <Separator />
-
-      <section className="space-y-4">
-        <h3 className="font-medium">Data Management</h3>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Button variant="outline" onClick={() => window.location.href = '/api/export'}>
-            <Download className="h-4 w-4 mr-2" />
-            Export Data
-          </Button>
-          <Button variant="outline" onClick={() => document.getElementById('import-file')?.click()}>
-            <Upload className="h-4 w-4 mr-2" />
-            Import Data
-          </Button>
-          <input
-            id="import-file"
-            type="file"
-            accept=".json"
-            onChange={handleImport}
-            className="hidden"
-          />
-        </div>
-      </section>
-
-      <Separator />
-
-      <section className="space-y-4">
-        <h3 className="font-medium">Danger Zone</h3>
-        <div className="p-4 rounded-lg border border-destructive/50 bg-destructive/5">
-          <p className="text-sm text-destructive/80 mb-3">
-            This will permanently delete all your saved items, settings, and local data.
-            This action cannot be undone.
-          </p>
-          <Button variant="destructive" onClick={handleDeleteAll}>
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete All Data
-          </Button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-/* ============================================
-   About Settings
-   ============================================ */
-
-function AboutSettings({ reset }: { reset: () => void }) {
-  return (
-    <div className="space-y-6">
-      <section className="space-y-4">
-        <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/50">
-          <div className="p-3 rounded-xl bg-primary/10">
-            <Brain className="h-8 w-8 text-primary" />
-          </div>
-          <div>
-            <h3 className="font-bold text-lg">CURIO</h3>
-            <p className="text-sm text-muted-foreground">Version 0.1.0</p>
-            <p className="text-sm text-muted-foreground mt-1">Your personal AI-powered mind space</p>
+      <Group>
+        <div className="flex items-center gap-3 px-4 py-4">
+          {user?.imageUrl ? (
+            <img src={user.imageUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
+          ) : (
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-elevated"><UserRound className="h-6 w-6" /></span>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-semibold">{user?.fullName || user?.username || 'Your account'}</p>
+            <p className="truncate text-sm text-muted-foreground">{user?.primaryEmailAddress?.emailAddress}</p>
           </div>
         </div>
-      </section>
+        <Row icon={UserRound} label="Manage account" onClick={() => clerk.openUserProfile()} />
+      </Group>
 
-      <Separator />
-
-      <section className="space-y-4">
-        <h3 className="font-medium">Links</h3>
-        <div className="space-y-2">
-          <LinkRow icon={<Brain className="h-4 w-4" />} label="Documentation" href="#" />
-          <LinkRow icon={<Shield className="h-4 w-4" />} label="Privacy Policy" href="#" />
-          <LinkRow icon={<Database className="h-4 w-4" />} label="Data Policy" href="#" />
-          <LinkRow icon={<Github className="h-4 w-4" />} label="GitHub Repository" href="#" />
+      <Group title="Appearance">
+        <div className="grid grid-cols-3 gap-2 p-2">
+          {THEMES.map(t => {
+            const Icon = t.icon;
+            const active = settings.theme === t.value;
+            return (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => updateSettings({ theme: t.value })}
+                className={cn('flex flex-col items-center gap-1.5 rounded-2xl py-3 text-sm font-medium', active ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-accent')}
+                aria-pressed={active}
+              >
+                <Icon className="h-5 w-5" /> {t.label}
+              </button>
+            );
+          })}
         </div>
-      </section>
+      </Group>
 
-      <Separator />
+      <Group title="Saving" footer="CURIO appears in your share sheet once it's installed on your phone.">
+        <Row icon={Share2} label="Set up sharing from other apps" hint="Instagram, YouTube, Safari, iOS Shortcut" to="/welcome" />
+        <Row
+          icon={Smartphone}
+          label={installed ? 'Installed on this device' : 'Install the app'}
+          hint={installed ? 'Opens full-screen from your home screen' : 'Add CURIO to your home screen'}
+          to={installed ? undefined : '/welcome?step=install'}
+        />
+      </Group>
 
-      <section className="space-y-4">
-        <h3 className="font-medium">Reset</h3>
-        <Button variant="outline" onClick={() => { if (confirm('Reset all settings to defaults?')) reset(); }}>
-          <RotateCcw className="h-4 w-4 mr-2" />
-          Reset Settings
-        </Button>
-      </section>
+      <Group title="Offline & sync" footer="Links you save offline are kept on this device and uploaded automatically when you reconnect.">
+        <Row
+          icon={RefreshCw}
+          label="Upload offline saves automatically"
+          right={<Switch checked={settings.syncEnabled} onCheckedChange={v => updateSettings({ syncEnabled: v })} />}
+        />
+        <Row
+          icon={syncing ? Loader2 : RefreshCw}
+          label="Sync now"
+          hint={syncStatus.queuedCount > 0 ? `${syncStatus.queuedCount} waiting to upload` : 'Everything is uploaded'}
+          onClick={syncNow}
+          disabled={syncing}
+        />
+      </Group>
+
+      <Group title="Your data">
+        <Row icon={exporting ? Loader2 : Download} label="Export all saves" hint="JSON file with every link, note, summary and tag" onClick={exportAll} disabled={exporting} />
+        <Row icon={Upload} label="Import links" hint="A CURIO export or any text file with links" onClick={() => fileRef.current?.click()} />
+        <Row icon={HardDrive} label="Clear this device’s cache" hint="Doesn’t delete anything from your account" onClick={() => setConfirmClear(true)} />
+      </Group>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".json,.txt,.csv,application/json,text/plain"
+        className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ''; }}
+      />
+
+      <Group>
+        <Row icon={LogOut} label="Sign out" danger onClick={() => clerk.signOut({ redirectUrl: '/' })} />
+      </Group>
+
+      <p className="pb-4 text-center text-xs text-muted-foreground">
+        <span className="font-display text-base italic text-foreground">curio</span> · your saves, made findable
+      </p>
+
+      <Sheet open={confirmClear} onClose={() => setConfirmClear(false)} title="Clear device cache?">
+        <p className="text-sm text-muted-foreground">
+          Removes the copy of your saves stored on this device for offline use. Everything stays in your CURIO account and downloads again next time you open the app.
+        </p>
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => setConfirmClear(false)} className="h-12 rounded-2xl border bg-elevated font-semibold">Cancel</button>
+          <button type="button" onClick={clearDevice} className="h-12 rounded-2xl bg-foreground font-semibold text-background">Clear</button>
+        </div>
+      </Sheet>
     </div>
   );
 }
-
-function LinkRow({ icon, label, href }: { icon: React.ReactNode; label: string; href: string }) {
-  return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent/50 transition-colors">
-      <span className="p-2 rounded-lg bg-muted">{icon}</span>
-      <span className="font-medium">{label}</span>
-    </a>
-  );
-}
-
-
-/* ============================================
-   UI Helpers
-   ============================================ */
-
-function SettingRow({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between">
-      <div className="flex-1">
-        <p className="font-medium">{label}</p>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
-      </div>
-      <div>{children}</div>
-    </div>
-  );
-}
-

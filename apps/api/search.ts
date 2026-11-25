@@ -1,14 +1,30 @@
 /**
  * GET /api/search
- * Semantic + keyword search over saved items
+ *   ?q=...                  semantic + keyword search
+ *   ?entity=recipe          a smart collection (recipe | place | product | event | workout)
+ *   ?relatedTo=<itemId>     saves similar to one item
+ *   ?facets=1               counts per platform / collection / tag (no items)
+ * Filters: platform, tags, dateFrom, dateTo, limit, offset, semantic
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from './lib/auth.js';
-import { initializeSchema, searchItems, semanticSearch } from './lib/db.js';
+import {
+  ENTITY_TYPES,
+  getItemEmbedding,
+  getLibraryFacets,
+  initializeSchema,
+  searchItems,
+  semanticSearch,
+} from './lib/db.js';
 import { generateEmbedding } from './lib/ai.js';
 import type { SearchResponse } from './lib/types';
+
+const boolParam = z.preprocess(
+  value => value === 'false' || value === '0' ? false : value === 'true' || value === '1' ? true : value,
+  z.boolean(),
+);
 
 const SearchSchema = z.object({
   q: z.string().default(''),
@@ -17,14 +33,14 @@ const SearchSchema = z.object({
     'pinterest', 'linkedin', 'threads', 'bluesky', 'generic'
   ]).optional(),
   tags: z.string().optional(),
+  entity: z.enum(ENTITY_TYPES).optional(),
+  relatedTo: z.string().min(1).max(100).optional(),
+  facets: boolParam.default(false),
   dateFrom: z.string().datetime().optional(),
   dateTo: z.string().datetime().optional(),
   limit: z.coerce.number().min(1).max(100).default(20),
   offset: z.coerce.number().min(0).default(0),
-  semantic: z.preprocess(
-    value => value === 'false' ? false : value === 'true' ? true : value,
-    z.boolean().default(true),
-  ),
+  semantic: boolParam.default(true),
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -47,11 +63,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const { q, platform, tags, dateFrom, dateTo, limit, offset, semantic } = parseResult.data;
+    const { q, platform, tags, entity, relatedTo, facets, dateFrom, dateTo, limit, offset, semantic } = parseResult.data;
+
+    if (facets) {
+      return res.status(200).json(await getLibraryFacets(userId));
+    }
 
     const filters = {
       userId,
       platform,
+      entity,
       tags: tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
       dateFrom,
       dateTo,
@@ -59,14 +80,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let result;
 
-    if (semantic && q.trim()) {
+    if (relatedTo) {
+      const embedding = await getItemEmbedding(relatedTo, userId);
+      result = embedding
+        ? await semanticSearch(embedding, { ...filters, excludeId: relatedTo }, limit, offset, '')
+        : { items: [], total: 0 };
+    } else if (semantic && q.trim()) {
       const queryEmbedding = await generateEmbedding(q);
       result = await semanticSearch(queryEmbedding, filters, limit, offset, q);
     } else {
       result = await searchItems(q, filters, limit, offset);
     }
 
-    const items = result.items.map(({ embedding, ...item }) => item);
+    const items = result.items.map(({ embedding: _embedding, ...item }) => item);
 
     return res.status(200).json({
       items,

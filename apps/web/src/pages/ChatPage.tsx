@@ -1,238 +1,192 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { Send, X, Copy, Check, MessageSquare, Sparkles, Loader2 } from 'lucide-react';
+import { ArrowUp, Copy, RotateCcw, Sparkles } from 'lucide-react';
+import type { ChatCitation } from '@curio/shared';
 import { useChat } from '../hooks/useItems';
-import { useSettings } from '../hooks/useSettings';
-import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { Badge } from '../components/ui/Badge';
-import { Avatar } from '../components/ui/Avatar';
-import { ScrollArea } from '../components/ui/ScrollArea';
-import { cn } from '../utils/cn';
+import { useSuccessToast } from '../components/ui/Toast';
 import { decodeEntities } from '../utils/text';
-import { useSuccessToast, useErrorToast } from '../components/ui/Toast';
+import { cn } from '../utils/cn';
+
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  citations?: ChatCitation[];
+  error?: boolean;
+}
+
+const SUGGESTIONS = [
+  'What recipes have I saved?',
+  'Summarize my design inspiration',
+  'Any places I wanted to visit?',
+  'What did I save this week about AI?',
+];
+
+/** Renders "[2]" markers in an answer as small tappable badges linking to the save. */
+function AnswerText({ text, citations }: { text: string; citations?: ChatCitation[] }) {
+  const byMarker = new Map((citations ?? []).map(c => [c.marker, c]));
+  const parts = text.split(/(\[\d+(?:\s*,\s*\d+)*\])/g);
+  return (
+    <p className="whitespace-pre-wrap text-[15.5px] leading-relaxed">
+      {parts.map((part, i) => {
+        const match = part.match(/^\[(\d+(?:\s*,\s*\d+)*)\]$/);
+        if (!match) return <span key={i}>{part}</span>;
+        return match[1].split(',').map(n => Number(n.trim())).map(n => {
+          const c = byMarker.get(n);
+          return c ? (
+            <Link key={`${i}-${n}`} to={`/item/${c.itemId}`} className="mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-primary/20 px-1 align-text-top text-[11px] font-bold text-primary">
+              {n}
+            </Link>
+          ) : null;
+        });
+      })}
+    </p>
+  );
+}
 
 export function ChatPage() {
-  const { settings } = useSettings();
-  const { mutate: chat, isPending, data: chatData } = useChat();
+  const chat = useChat();
   const successToast = useSuccessToast();
-  const errorToast = useErrorToast();
-
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; citations?: any[]; timestamp: Date }>>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, chat.isPending]);
 
-  const handleSubmit = async (e?: { preventDefault?: () => void }, suggestedMessage?: string) => {
-    e?.preventDefault?.();
-    const message = (suggestedMessage || input).trim();
-    if (!message || isPending) return;
+  // Auto-grow the textarea
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [input]);
 
-    const userMessage = message;
+  const send = (text?: string) => {
+    const message = (text ?? input).trim();
+    if (!message || chat.isPending) return;
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage, timestamp: new Date() }]);
-    setIsTyping(true);
-
-    try {
-      const result = await new Promise<any>((resolve, reject) => {
-        chat(
-          { message: userMessage, contextLimit: 15 },
-          {
-            onSuccess: resolve,
-            onError: reject,
-          }
-        );
-      });
-
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: result.answer,
-        citations: result.citations,
-        timestamp: new Date(),
-      }]);
-    } catch (error) {
-      errorToast('Chat failed', error instanceof Error ? error.message : 'Unknown error');
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.',
-        timestamp: new Date(),
-      }]);
-    } finally {
-      setIsTyping(false);
-    }
+    setMessages(prev => [...prev, { role: 'user', content: message }]);
+    chat.mutate(
+      { message, contextLimit: 12 },
+      {
+        onSuccess: result => setMessages(prev => [...prev, { role: 'assistant', content: result.answer, citations: result.citations }]),
+        onError: error =>
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: error instanceof Error ? `Couldn’t answer: ${error.message}` : 'Something went wrong. Try again.',
+            error: true,
+          }]),
+      },
+    );
   };
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    successToast('Copied to clipboard');
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    send();
   };
-
-  const handleNewChat = () => {
-    setMessages([]);
-    setInput('');
-  };
-
-  // Example prompts
-  const examplePrompts = [
-    "What did I save about React hooks?",
-    "Show me all recipe saves",
-    "What design inspiration did I save last month?",
-    "Find saves about productivity",
-    "What did I save from @username?",
-  ];
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b p-4 bg-card/50 backdrop-blur sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <MessageSquare className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold">Chat with your saves</h1>
-            <p className="text-sm text-muted-foreground">Ask anything about what you've saved</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={handleNewChat}>
-            <Sparkles className="h-4 w-4 mr-1" /> New Chat
-          </Button>
-        </div>
-      </div>
-
-      {/* Messages */}
-      <ScrollArea className="flex-1 overflow-y-auto p-4 space-y-6">
+    <div className="flex min-h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] flex-col">
+      <div className="flex-1 space-y-5 px-4 pb-44 pt-3">
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center py-12">
-            <div className="p-4 rounded-full bg-primary/10 mb-6">
-              <Sparkles className="h-12 w-12 text-primary mx-auto" />
-            </div>
-            <h2 className="text-2xl font-bold mb-2">Start a conversation</h2>
-            <p className="text-muted-foreground mb-8 max-w-md">
-              Ask me anything about your saved content. I'll search through your saves and give you answers with citations.
+          <div className="flex flex-col items-center pt-10 text-center">
+            <span className="flex h-16 w-16 items-center justify-center rounded-[22px] bg-primary/20 text-primary">
+              <Sparkles className="h-8 w-8" />
+            </span>
+            <h1 className="mt-5 font-display text-4xl italic">Ask your library</h1>
+            <p className="mt-2 max-w-xs text-sm text-muted-foreground">
+              Answers come only from what you&rsquo;ve saved, with links back to each source.
             </p>
-            <div className="flex flex-wrap gap-2 justify-center">
-              {examplePrompts.map((prompt, i) => (
-                <Button
-                  key={i}
-                  variant="outline"
-                  size="sm"
-                  className="text-left min-w-[200px]"
-                  onClick={() => { void handleSubmit(undefined, prompt); }}
-                >
-                  {prompt}
-                </Button>
+            <div className="mt-8 grid w-full gap-2">
+              {SUGGESTIONS.map(s => (
+                <button key={s} type="button" onClick={() => send(s)} className="pressable rounded-2xl border bg-card px-4 py-3 text-left text-[15px] hover:border-primary/50">
+                  {s}
+                </button>
               ))}
             </div>
           </div>
         ) : (
-          messages.map((message, index) => (
-            <MessageBubble key={index} message={message} onCopy={handleCopy} />
-          ))
+          <>
+            <div className="flex justify-end">
+              <button type="button" onClick={() => setMessages([])} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+                <RotateCcw className="h-3.5 w-3.5" /> New chat
+              </button>
+            </div>
+            {messages.map((m, i) =>
+              m.role === 'user' ? (
+                <div key={i} className="flex justify-end">
+                  <p className="max-w-[85%] whitespace-pre-wrap rounded-[22px] rounded-br-md bg-primary px-4 py-2.5 text-[15.5px] text-primary-foreground">{m.content}</p>
+                </div>
+              ) : (
+                <div key={i} className="space-y-3">
+                  <div className={cn('rounded-[22px] rounded-bl-md border bg-card px-4 py-3', m.error && 'border-destructive/40')}>
+                    <AnswerText text={m.content} citations={m.citations} />
+                  </div>
+                  {m.citations && m.citations.length > 0 && (
+                    <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">
+                      {m.citations.map(c => (
+                        <Link key={c.itemId} to={`/item/${c.itemId}`} className="pressable w-[210px] shrink-0 rounded-2xl border bg-card p-3">
+                          <span className="flex items-center gap-2">
+                            <span className="flex h-5 min-w-5 items-center justify-center rounded-md bg-primary/20 px-1 text-[11px] font-bold text-primary">{c.marker}</span>
+                            <span className="truncate text-sm font-semibold">{decodeEntities(c.itemTitle)}</span>
+                          </span>
+                          {c.excerpt && <span className="mt-1 block text-xs text-muted-foreground line-clamp-2">{decodeEntities(c.excerpt)}</span>}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                  {!m.error && (
+                    <button
+                      type="button"
+                      onClick={async () => { await navigator.clipboard?.writeText(m.content); successToast('Copied'); }}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      <Copy className="h-3 w-3" /> Copy
+                    </button>
+                  )}
+                </div>
+              ),
+            )}
+            {chat.isPending && (
+              <div className="flex w-16 items-center justify-center gap-1 rounded-[22px] rounded-bl-md border bg-card py-4" aria-label="Thinking">
+                {[0, 1, 2].map(i => (
+                  <span key={i} className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: `${i * 0.15}s` }} />
+                ))}
+              </div>
+            )}
+          </>
         )}
+        <div ref={endRef} />
+      </div>
 
-        {isTyping && <TypingIndicator />}
-        <div ref={messagesEndRef} />
-      </ScrollArea>
-
-      {/* Input */}
-      <div className="border-t p-4 bg-card/50 backdrop-blur">
-        <form onSubmit={handleSubmit} className="flex gap-2">
+      {/* Composer, floating above the tab bar */}
+      <form
+        onSubmit={onSubmit}
+        className="fixed inset-x-0 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-40 mx-auto max-w-xl px-4"
+      >
+        <div className="glass flex items-end gap-2 rounded-[24px] border border-white/10 p-1.5 pl-4 shadow-lg">
           <textarea
             ref={inputRef}
+            rows={1}
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="Ask about your saves..."
-            className="flex-1 min-h-[48px] max-h-48 px-4 py-3 rounded-xl border bg-background resize-none focus:ring-2 focus:ring-primary/20"
-            rows={1}
-            disabled={isPending}
-            aria-label="Chat input"
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="Ask about your saves…"
+            className="max-h-[140px] min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[16px] placeholder:text-muted-foreground focus:outline-none"
+            aria-label="Message"
           />
-          <Button
+          <button
             type="submit"
-            size="lg"
-            disabled={!input.trim() || isPending}
-            className="h-12 self-end"
-            aria-label="Send message"
+            disabled={!input.trim() || chat.isPending}
+            className="pressable flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-30"
+            aria-label="Send"
           >
-            {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-          </Button>
-        </form>
-        <p className="text-xs text-muted-foreground text-center mt-2">
-          Powered by your saved content • AI answers based on your library
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function MessageBubble({ message, onCopy }: { message: any; onCopy: (text: string) => void }) {
-  const [copied, setCopied] = useState(false);
-
-  return (
-    <div className={cn('flex gap-3', message.role === 'user' && 'flex-row-reverse')}>
-      <Avatar
-        fallback={message.role === 'user' ? 'You' : 'AI'}
-        src={message.role === 'assistant' ? undefined : undefined}
-        className="shrink-0"
-      />
-      <div className={cn('flex-1 max-w-3xl', message.role === 'user' && 'text-right')}>
-        <div className={cn(
-          'inline-block px-4 py-2.5 rounded-2xl text-sm',
-          message.role === 'user'
-            ? 'bg-primary text-primary-foreground rounded-tr-none'
-            : 'bg-muted rounded-tl-none'
-        )}>
-          <div className="prose prose-sm max-w-none whitespace-pre-wrap">{message.content}</div>
-
-          {/* Citations */}
-          {message.citations && message.citations.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {message.citations.map((citation: any, i: number) => (
-                <Link
-                  key={citation.itemId ?? i}
-                  to={`/item/${citation.itemId}`}
-                  title={citation.excerpt || citation.itemTitle}
-                  className="inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-background/50 rounded hover:bg-accent transition-colors"
-                >
-                  <span className="text-muted-foreground">[{citation.marker ?? i + 1}]</span>
-                  <span className="truncate max-w-[200px]">{decodeEntities(citation.itemTitle)}</span>
-                </Link>
-              ))}
-            </div>
-          )}
-
-          <div className="flex items-center justify-end gap-2 mt-2">
-            <span className="text-xs text-muted-foreground">{message.timestamp.toLocaleTimeString()}</span>
-            <Button variant="ghost" size="icon" onClick={() => { onCopy(message.content); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
-              {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
-            </Button>
-          </div>
+            <ArrowUp className="h-5 w-5" strokeWidth={2.5} />
+          </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function TypingIndicator() {
-  return (
-    <div className="flex gap-3">
-      <Avatar fallback="AI" />
-      <div className="bg-muted rounded-2xl rounded-tl-none px-4 py-3">
-        <div className="flex gap-1">
-          <span className="h-2 w-2 bg-primary/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="h-2 w-2 bg-primary/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="h-2 w-2 bg-primary/50 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-        </div>
-      </div>
+      </form>
     </div>
   );
 }

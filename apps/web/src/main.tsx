@@ -6,6 +6,7 @@ import { ClerkProvider } from '@clerk/react';
 import { App } from './App';
 import './index.css';
 import { registerSW } from './utils/sw';
+import './utils/install'; // capture the PWA install prompt as early as possible
 
 /* Global query client */
 export const queryClient = new QueryClient({
@@ -29,7 +30,11 @@ if ('serviceWorker' in navigator) {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     {CLERK_PUBLISHABLE_KEY ? (
-      <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} afterSignOutUrl="/">
+      <ClerkProvider
+        publishableKey={CLERK_PUBLISHABLE_KEY}
+        afterSignOutUrl="/"
+        appearance={{ variables: { colorPrimary: '#8b5cf6', borderRadius: '14px', fontFamily: 'Inter, system-ui, sans-serif' } }}
+      >
         <QueryClientProvider client={queryClient}>
           <BrowserRouter>
             <App />

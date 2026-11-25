@@ -1,337 +1,158 @@
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle, Loader2, XCircle, AlertCircle, Share2, Brain, Zap } from 'lucide-react';
-import { addToQueue, parseShareTargetData, saveItemLocally } from '../services/indexeddb';
-import { ingestItem } from '../services/api';
-import { Button } from '../components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { cn } from '../utils/cn';
-import { useSuccessToast, useInfoToast } from '../components/ui/Toast';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { AlertCircle, Check, CloudOff, Loader2 } from 'lucide-react';
+import type { SavedItem } from '@curio/shared';
+import { findUrl, saveLink, type SaveOutcome } from '../services/save';
+import { Cover } from '../components/Cover';
+import { displayTitle } from '../utils/text';
+import { platformMeta } from '../utils/platform';
 
+type State =
+  | { kind: 'idle' }
+  | { kind: 'saving' }
+  | { kind: 'done'; outcome: SaveOutcome }
+  | { kind: 'error'; message: string };
+
+/**
+ * Landing page for the Web Share Target (Android/desktop) and the iOS Shortcut
+ * (`/share-target?url=...`). Saves immediately, then shows what was saved.
+ */
 export function ShareTargetPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const successToast = useSuccessToast();
-  const infoToast = useInfoToast();
+  const queryClient = useQueryClient();
+  const [params] = useSearchParams();
+  const [state, setState] = useState<State>({ kind: 'idle' });
+  const [manual, setManual] = useState('');
+  const attempted = useRef<string | null>(null);
 
-  const [state, setState] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const [savedItem, setSavedItem] = useState<any>(null);
-  const [manualUrl, setManualUrl] = useState('');
-  const attemptedShareRef = useRef<string | null>(null);
-
-  const saveSharedContent = async (data: { url?: string | null; title?: string | null; text?: string | null }) => {
-    const parsed = parseShareTargetData(data);
-    const candidate = parsed.url || findUrl(parsed.text || '');
-    parsed.url = candidate;
-    if (!parsed.url) throw new Error('No link was received. Use Copy Link in Instagram, then paste the link here.');
-    const normalizedUrl = parsed.url.trim();
-    let validUrl: URL;
-    try { validUrl = new URL(normalizedUrl); } catch { throw new Error('The shared content did not contain a valid link.'); }
-    if (validUrl.protocol !== 'https:' && validUrl.protocol !== 'http:') throw new Error('Only web links can be saved.');
-
-    // Instagram includes the Reel caption in shared title/text. CURIO only
-    // needs the canonical URL for this save flow.
-    const payload = { url: validUrl.toString() };
-    if (!navigator.onLine) {
-      await addToQueue(payload);
-      window.dispatchEvent(new Event('queue-updated'));
-      return { queued: true as const };
-    }
-
+  const run = async (raw: string) => {
+    setState({ kind: 'saving' });
     try {
-      const result = await ingestItem(payload);
-      if (!result.success || !result.item) throw new Error(result.error || 'The server did not confirm the save.');
-      await saveItemLocally(result.item);
-      return { queued: false as const, item: result.item, message: result.message };
-    } catch (error) {
-      // Only network failures should be queued. A server/API error must be visible
-      // so we don't tell the user their link was saved when it was rejected.
-      if (error instanceof TypeError) {
-        await addToQueue(payload);
-        window.dispatchEvent(new Event('queue-updated'));
-        return { queued: true as const };
-      }
-      throw error;
-    }
-  };
-
-  const handleManualSave = async () => {
-    setState('processing');
-    try {
-      const outcome = await saveSharedContent({ url: manualUrl });
-      if (outcome.queued) {
-        setState('success');
-        infoToast('Queued for sync', 'Saved offline - will sync when online');
-      } else {
-        setSavedItem(outcome.item);
-        setState('success');
-        const title = outcome.item.title || 'Link';
-        if (outcome.message === 'Already saved') {
-          infoToast('Already in CURIO', `"${title}" is already in your library`);
-        } else {
-          successToast('Saved!', `"${title}" added to CURIO`);
-        }
-      }
+      const outcome = await saveLink(raw);
+      await queryClient.invalidateQueries({ queryKey: ['items'] });
+      setState({ kind: 'done', outcome });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to save';
-      setError(message);
-      setState('error');
+      setState({ kind: 'error', message: err instanceof Error ? err.message : 'Couldn’t save that link' });
     }
   };
 
-  // Process share data on mount
+  // Shared via URL params
   useEffect(() => {
-    const processShare = async () => {
-      // Get data from URL params (Web Share Target GET fallback)
-      const url = searchParams.get('url');
-      const title = searchParams.get('title');
-      const text = searchParams.get('text');
-      const shareKey = JSON.stringify([url, title, text]);
-
-      if (!url && !title && !text) {
-        // No share data - might be direct navigation
-        setState('idle');
-        return;
+    const candidate = params.get('url') || findUrl(params.get('text')) || findUrl(params.get('title'));
+    const key = JSON.stringify([params.get('url'), params.get('text'), params.get('title')]);
+    if (!candidate) {
+      if (params.get('text') || params.get('title')) {
+        setState({ kind: 'error', message: 'No link came through. In the app, use Copy Link and paste it below.' });
       }
+      return;
+    }
+    // Strict Mode mounts effects twice in development: never save the same share twice
+    if (attempted.current === key) return;
+    attempted.current = key;
+    void run(candidate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
-      // React Strict Mode may mount effects twice in development. Never ingest
-      // the same share payload twice during one page session.
-      if (attemptedShareRef.current === shareKey) return;
-      attemptedShareRef.current = shareKey;
-
-      setState('processing');
-      setError(null);
-
-      try {
-        const shareData = { url, title: title || undefined, text: text || undefined };
-        const outcome = await saveSharedContent(shareData);
-        if (outcome.queued) {
-          setState('success');
-          infoToast('Queued for sync', 'Saved offline - will sync when online');
-        } else {
-          setSavedItem(outcome.item);
-          setState('success');
-          const itemTitle = outcome.item.title || 'Link';
-          if (outcome.message === 'Already saved') {
-            infoToast('Already in CURIO', `"${itemTitle}" is already in your library`);
-          } else {
-            successToast('Saved!', `"${itemTitle}" added to CURIO`);
-          }
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to save';
-        setError(message);
-        setState('error');
-      }
-    };
-
-    processShare();
-  }, [searchParams, successToast, infoToast]);
-
-  // Handle POST data from service worker (via message)
+  // Shared via POST, relayed by the service worker
   useEffect(() => {
-    const handleMessage = async (event: MessageEvent) => {
-      if (event.data?.type === 'SHARED_CONTENT' && state === 'idle') {
-        setState('processing');
-        try {
-          const outcome = await saveSharedContent(event.data.payload || {});
-          if (outcome.queued) {
-            setState('success');
-            infoToast('Queued for sync', 'Saved offline - will sync when online');
-          } else {
-            setSavedItem(outcome.item);
-            setState('success');
-            successToast('Saved!', `"${outcome.item.title || 'Link'}" added to CURIO`);
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Failed to save';
-          setError(message);
-          setState('error');
-        }
-      }
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'SHARED_CONTENT') return;
+      const p = event.data.payload ?? {};
+      const candidate = p.url || findUrl(p.text) || findUrl(p.title);
+      if (candidate) void run(candidate);
     };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [state, successToast, infoToast]);
+  const submitManual = (e: FormEvent) => {
+    e.preventDefault();
+    if (manual.trim()) void run(manual);
+  };
 
-  // If no share data and idle, show instruction page
-  if (state === 'idle') {
-    return (
-      <ShareInstructionsPage url={manualUrl} setUrl={setManualUrl} onSave={handleManualSave} />
-    );
-  }
-
-  // Processing state
-  if (state === 'processing') {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-6 pb-8 px-6 text-center">
-            <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-              <Loader2 className="h-8 w-8 text-primary animate-spin" />
-            </div>
-            <h2 className="text-xl font-bold mb-2">Saving to CURIO...</h2>
-            <p className="text-muted-foreground">Processing your share</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Success state
-  if (state === 'success') {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-6 pb-8 px-6 text-center">
-            <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center">
-              <CheckCircle className="h-8 w-8 text-green-500" />
-            </div>
-            <h2 className="text-xl font-bold mb-2">Saved to CURIO!</h2>
-            <p className="text-muted-foreground mb-6">Your link is saved and ready in CURIO.</p>
-
-            {savedItem && (
-              <div className="mb-6 p-4 rounded-lg bg-muted/50 text-left">
-                <p className="font-medium truncate">{savedItem.platform === 'instagram' ? 'Instagram Reel' : `${savedItem.platform} link`}</p>
-                <p className="text-sm text-muted-foreground mt-1">{savedItem.platform}</p>
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <Button className="flex-1" onClick={() => navigate('/')}>
-                <Brain className="h-4 w-4 mr-2" />
-                View in CURIO
-              </Button>
-              <Button variant="outline" className="flex-1" onClick={() => window.close()}>
-                <XCircle className="h-4 w-4 mr-2" />
-                Close
-              </Button>
-            </div>
-
-            <p className="mt-4 text-xs text-muted-foreground">
-              Tip: Share from any app (Instagram, TikTok, Safari, etc.) to save instantly
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Error state
-  if (state === 'error') {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-6 pb-8 px-6 text-center">
-            <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
-              <AlertCircle className="h-8 w-8 text-red-500" />
-            </div>
-            <h2 className="text-xl font-bold mb-2">Couldn't save</h2>
-            <p className="text-muted-foreground mb-6">{error || 'An unknown error occurred'}</p>
-
-            <div className="flex gap-3">
-              <Button className="flex-1" onClick={() => window.location.reload()}>Try Again</Button>
-              <Button variant="outline" className="flex-1" onClick={() => navigate('/')}>
-                <XCircle className="h-4 w-4 mr-2" />
-                Go Home
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  return null;
-}
-
-/* ============================================
-   Instructions Page (when opened directly)
-   ============================================ */
-
-function ShareInstructionsPage({ url, setUrl, onSave }: { url: string; setUrl: (url: string) => void; onSave: () => void }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md text-center">
-        {/* Logo */}
-        <img
-          src="/icons/icon-192x192.png"
-          alt="CURIO logo"
-          className="mx-auto mb-6 w-20 h-20 rounded-2xl shadow-md"
-        />
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background px-6 pb-safe pt-safe">
+      <div className="w-full max-w-sm">
+        {state.kind === 'saving' && (
+          <div className="text-center animate-in">
+            <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-[26px] bg-primary/15">
+              <Loader2 className="h-9 w-9 animate-spin text-primary" />
+            </span>
+            <h1 className="mt-6 text-2xl font-bold">Saving to CURIO</h1>
+            <p className="mt-2 text-muted-foreground">Reading it, tagging it, making it findable…</p>
+          </div>
+        )}
 
-        <h1 className="text-3xl font-bold mb-2">Save to CURIO</h1>
-        <p className="text-muted-foreground mb-8">
-          Paste any Reel, video, or article link below, or use your iOS Share Sheet shortcut.
-        </p>
+        {state.kind === 'done' && <Saved outcome={state.outcome} onDone={() => navigate('/', { replace: true })} />}
 
-        <div className="mb-6 flex gap-2">
-          <input
-            aria-label="Reel or video link"
-            type="url"
-            inputMode="url"
-            autoComplete="url"
-            placeholder="Paste a Reel or video link"
-            value={url}
-            onChange={event => setUrl(event.target.value)}
-            className="min-w-0 flex-1 rounded-lg border bg-card px-3 py-2 text-sm"
-          />
-          <Button onClick={onSave} disabled={!url.trim()}>Save link</Button>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">How to use</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-left">
-            <Step number={1} icon={<Share2 className="h-5 w-5" />}>
-              <strong>Open any app</strong> (Instagram, TikTok, X, Safari, etc.)
-            </Step>
-            <Step number={2} icon={<Zap className="h-5 w-5" />}>
-              <strong>Tap Share</strong> on a post, reel, link, or selected text
-            </Step>
-            <Step number={3} icon={<Brain className="h-5 w-5" />}>
-              <strong>On iPhone, copy the link</strong> from the share sheet, then open CURIO and paste it
-            </Step>
-            <Step number={4} icon={<CheckCircle className="h-5 w-5" />}>
-              <strong>Done!</strong> Content is saved, tagged, and searchable
-            </Step>
-          </CardContent>
-        </Card>
-
-        <div className="mt-8 p-4 rounded-lg bg-muted/50">
-          <p className="text-sm text-muted-foreground">
-            <strong>Shortcut option:</strong> Create a Shortcut that accepts URLs from the share sheet and opens CURIO’s save-link page with that URL.
-          </p>
-        </div>
-
-        <Button className="mt-6 w-full" onClick={() => window.location.href = '/'}>
-          <Brain className="h-4 w-4 mr-2" />
-          Open CURIO
-        </Button>
+        {(state.kind === 'idle' || state.kind === 'error') && (
+          <div className="animate-in">
+            {state.kind === 'error' ? (
+              <div className="mb-6 flex gap-3 rounded-2xl bg-destructive/15 p-4 text-sm text-destructive">
+                <AlertCircle className="h-5 w-5 shrink-0" />
+                <span>{state.message}</span>
+              </div>
+            ) : (
+              <>
+                <h1 className="font-display text-4xl italic">Save a link</h1>
+                <p className="mt-2 text-muted-foreground">Paste a Reel, video, post or article.</p>
+              </>
+            )}
+            <form onSubmit={submitManual} className="mt-6 space-y-3">
+              <input
+                type="url"
+                inputMode="url"
+                autoCapitalize="off"
+                value={manual}
+                onChange={e => setManual(e.target.value)}
+                placeholder="https://"
+                className="h-14 w-full rounded-2xl border bg-card px-4 text-[16px] focus:border-primary/60 focus:outline-none"
+                aria-label="Link to save"
+              />
+              <button type="submit" disabled={!manual.trim()} className="pressable h-12 w-full rounded-2xl bg-primary font-semibold text-primary-foreground disabled:opacity-40">
+                Save
+              </button>
+            </form>
+            <Link to="/" className="mt-4 block text-center text-sm font-medium text-muted-foreground">Back to library</Link>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function findUrl(value: string): string | null {
-  const match = value.match(/https?:\/\/[^\s<>"']+/i);
-  return match ? match[0].replace(/[),.!?]+$/, '') : null;
-}
-
-function Step({ number, icon, children }: { number: number; icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-3">
-      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-        {number}
+function Saved({ outcome, onDone }: { outcome: SaveOutcome; onDone: () => void }) {
+  if (outcome.status === 'queued') {
+    return (
+      <div className="text-center animate-in">
+        <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-[26px] bg-elevated"><CloudOff className="h-9 w-9" /></span>
+        <h1 className="mt-6 text-2xl font-bold">Saved offline</h1>
+        <p className="mt-2 text-muted-foreground">It&rsquo;ll upload as soon as you&rsquo;re back online.</p>
+        <button type="button" onClick={onDone} className="pressable mt-8 h-12 w-full rounded-2xl bg-primary font-semibold text-primary-foreground">Done</button>
       </div>
-      <div className="flex-1">
-        <div className="flex items-center gap-2 mb-1">
-          {icon}
-          <span className="font-medium">{children}</span>
+    );
+  }
+
+  const item: SavedItem = outcome.item;
+  const meta = platformMeta(item.platform);
+  return (
+    <div className="animate-in">
+      <p className="mb-4 flex items-center justify-center gap-2 font-semibold text-success">
+        <Check className="h-5 w-5" /> {outcome.status === 'duplicate' ? 'Already in your library' : 'Saved'}
+      </p>
+      <div className="overflow-hidden rounded-[26px] border bg-card">
+        <Cover item={item} size="md" className={meta.aspect === 'portrait' ? 'aspect-[4/5] max-h-[46vh] w-full' : 'aspect-[16/10] w-full'} />
+        <div className="p-4">
+          <p className="text-xs font-medium text-muted-foreground">{meta.label}</p>
+          <p className="mt-1 font-semibold leading-snug line-clamp-2">{displayTitle(item)}</p>
+          {item.summary && <p className="mt-1.5 text-sm text-muted-foreground line-clamp-3">{item.summary}</p>}
         </div>
+      </div>
+      <div className="mt-5 grid grid-cols-2 gap-2">
+        <Link to={`/item/${item.id}`} replace className="flex h-12 items-center justify-center rounded-2xl border bg-card font-semibold">View</Link>
+        <button type="button" onClick={onDone} className="pressable h-12 rounded-2xl bg-primary font-semibold text-primary-foreground">Done</button>
       </div>
     </div>
   );

@@ -1,20 +1,34 @@
-import { Fragment, useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, Copy, Tag, Calendar, Globe, User, Loader2, Sparkles, Brain, Pencil, Trash2, RefreshCw, AlertCircle, Clock } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowUpRight,
+  CalendarPlus,
+  Clock,
+  Copy,
+  Loader2,
+  MapPin,
+  MoreHorizontal,
+  Pencil,
+  RefreshCw,
+  Share,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
+import type { SavedItem } from '@curio/shared';
 import { getItemLocally } from '../services/indexeddb';
-import { getItem, searchItems } from '../services/api';
-import { Button } from '../components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { Badge, PlatformBadge } from '../components/ui/Badge';
-import { Avatar } from '../components/ui/Avatar';
-import { Skeleton } from '../components/ui/Skeleton';
-import { formatDistanceToNow, format } from 'date-fns';
+import { getItem } from '../services/api';
+import { useDeleteItem, useRelatedItems, useReprocessItem, useUpdateItem } from '../hooks/useItems';
+import { Cover } from '../components/Cover';
+import { Sheet } from '../components/Sheet';
+import { SaveRow, SaveRowSkeleton, shareItem, timeAgo } from '../components/SaveCard';
+import { useErrorToast, useSuccessToast } from '../components/ui/Toast';
+import { COLLECTIONS, calendarUrl, isCollectionType, mapsUrl } from '../utils/collections';
+import { hostnameOf, platformMeta } from '../utils/platform';
+import { cleanCaption, cleanEntities, decodeEntities, displayAuthor, displayTitle, topicTags } from '../utils/text';
 import { cn } from '../utils/cn';
-import { decodeEntities, displayAuthor, displayTitle } from '../utils/text';
-import { useSuccessToast, useErrorToast } from '../components/ui/Toast';
-import { Input } from '../components/ui/Input';
-import { useDeleteItem, useReprocessItem, useUpdateItem } from '../hooks/useItems';
+import { format } from 'date-fns';
 
 export function ItemPage() {
   const { id } = useParams<{ id: string }>();
@@ -24,396 +38,447 @@ export function ItemPage() {
   const updateMutation = useUpdateItem();
   const deleteMutation = useDeleteItem();
   const reprocessMutation = useReprocessItem();
-  const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState({ title: '', userNote: '', tags: '' });
-  const [item, setItem] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const related = useRelatedItems(id, 6);
 
-  // Fetch item
+  const [item, setItem] = useState<SavedItem | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   useEffect(() => {
     if (!id) return;
-
-    const load = async () => {
-      setIsLoading(true);
+    let cancelled = false;
+    setIsLoading(true);
+    (async () => {
       try {
-        // Try local first
         const local = await getItemLocally(id);
-        if (local) {
-          setItem(local);
-        }
-
-        // Also try server for freshest data
-        const serverItem = await getItem(id);
-        if (serverItem) setItem(serverItem);
+        if (local && !cancelled) setItem(local);
+        const fresh = await getItem(id);
+        if (!cancelled) setItem(fresh ?? local ?? null);
       } catch (error) {
         console.error('Failed to load item:', error);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
-    };
-
-    load();
+    })();
+    window.scrollTo(0, 0);
+    return () => { cancelled = true; };
   }, [id]);
 
-  if (isLoading) {
+  if (isLoading && !item) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-4 w-64" />
-        <Card>
-          <CardContent className="p-6">
-            <Skeleton className="h-64 w-full rounded-lg" />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6 space-y-4">
-            <Skeleton className="h-4 w-1/4" />
-            <Skeleton className="h-4 w-1/2" />
-            <Skeleton className="h-4 w-3/4" />
-          </CardContent>
-        </Card>
+      <div>
+        <div className="aspect-[4/5] max-h-[70vh] w-full animate-pulse bg-elevated" />
+        <div className="space-y-3 p-5">
+          <div className="h-6 w-3/4 animate-pulse rounded-full bg-elevated" />
+          <div className="h-4 w-1/2 animate-pulse rounded-full bg-elevated" />
+        </div>
       </div>
     );
   }
 
   if (!item) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-center">
-        <Brain className="h-12 w-12 text-muted-foreground/50 mb-4" />
-        <h2 className="text-xl font-semibold">Item not found</h2>
-        <p className="text-muted-foreground mt-1">This save may have been deleted</p>
-        <Link to="/" className="mt-4 text-primary hover:underline">Back to home</Link>
+      <div className="flex min-h-[70vh] flex-col items-center justify-center px-6 text-center">
+        <p className="text-5xl">🫥</p>
+        <h1 className="mt-4 text-xl font-semibold">This save isn&rsquo;t here</h1>
+        <p className="mt-1 text-sm text-muted-foreground">It may have been deleted.</p>
+        <Link to="/" className="mt-6 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground">Back to library</Link>
       </div>
     );
   }
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(item.url);
+  const meta = platformMeta(item.platform);
+  const PlatformIcon = meta.icon;
+  const title = displayTitle(item);
+  const author = displayAuthor(item);
+  const entities = cleanEntities(item.entities);
+  const tags = topicTags(item.tags);
+  const note = cleanCaption(item.userNote);
+  const summary = decodeEntities(item.summary);
+
+  const copyLink = async () => {
+    await navigator.clipboard?.writeText(item.url);
     successToast('Link copied');
   };
 
-  const handleOpen = () => window.open(item.url, '_blank', 'noopener,noreferrer');
-
-  const startEditing = () => {
-    setDraft({
-      title: decodeEntities(item.title),
-      userNote: decodeEntities(item.userNote),
-      tags: (item.tags ?? []).join(', '),
-    });
-    setIsEditing(true);
-  };
-
-  const handleSave = () => {
-    const tags = [...new Set(draft.tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean))];
-    updateMutation.mutate(
-      { id: item.id, edits: { title: draft.title.trim() || null, userNote: draft.userNote.trim() || null, tags } },
-      {
-        onSuccess: (updated) => {
-          setItem(updated);
-          setIsEditing(false);
-          successToast('Changes saved');
-        },
-        onError: (e) => errorToast(e instanceof Error ? e.message : 'Could not save changes'),
+  const reprocess = () => {
+    setMenuOpen(false);
+    reprocessMutation.mutate(item.id, {
+      onSuccess: updated => {
+        setItem(updated);
+        if (updated.enrichmentStatus === 'enriched') successToast('Refreshed', 'Summary, tags and details updated');
+        else errorToast('AI is unavailable right now', 'CURIO will keep retrying automatically');
       },
-    );
+      onError: e => errorToast('Couldn’t re-run AI', e instanceof Error ? e.message : undefined),
+    });
   };
 
-  const handleDelete = () => {
-    if (!confirm('Delete this save? This cannot be undone.')) return;
+  const remove = () => {
     deleteMutation.mutate(item.id, {
       onSuccess: () => {
-        successToast('Save deleted');
+        successToast('Deleted');
         navigate('/', { replace: true });
       },
-      onError: (e) => errorToast(e instanceof Error ? e.message : 'Could not delete'),
-    });
-  };
-
-  const handleReprocess = () => {
-    reprocessMutation.mutate(item.id, {
-      onSuccess: (updated) => {
-        setItem(updated);
-        if (updated.enrichmentStatus === 'enriched') successToast('AI details refreshed');
-        else errorToast('AI is still unavailable; CURIO will keep retrying automatically');
-      },
-      onError: (e) => errorToast(e instanceof Error ? e.message : 'Could not re-run AI'),
+      onError: e => errorToast('Couldn’t delete', e instanceof Error ? e.message : undefined),
     });
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      {/* Back Button */}
-      <Link to="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft className="h-4 w-4" />
-        Back
-      </Link>
+    <article className="pb-8">
+      {/* Hero */}
+      <div className="relative">
+        <Cover
+          item={item}
+          size="lg"
+          className={cn('w-full', meta.aspect === 'portrait' ? 'aspect-[4/5] max-h-[72vh]' : 'aspect-[16/10]')}
+        />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-background to-transparent" />
+        <div className="absolute inset-x-0 top-0 flex items-center justify-between p-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+          <button
+            type="button"
+            onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/'))}
+            className="pressable flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md"
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            className="pressable flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md"
+            aria-label="More actions"
+          >
+            <MoreHorizontal className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
 
-      {/* Main Card */}
-      <Card className="overflow-hidden">
-        {/* Header with thumbnail */}
-        {item.thumbnailUrl && (
-          <div className="relative h-64 w-full">
-            <img
-              src={item.thumbnailUrl}
-              alt={item.title || ''}
-              className="h-full w-full object-cover"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-background/90 to-transparent" />
-            <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
-              <div>
-                <PlatformBadge platform={item.platform} />
-              </div>
-              <div className="flex gap-2">
-                <Button variant="secondary" size="icon" onClick={handleCopy} aria-label="Copy link">
-                  <Copy className="h-4 w-4" />
-                </Button>
-                <Button variant="default" size="icon" onClick={handleOpen} aria-label="Open original">
-                  <ExternalLink className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+      <div className="relative -mt-6 space-y-6 px-5">
+        <header className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+            <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold', meta.chip)}>
+              <PlatformIcon className="h-3.5 w-3.5" /> {meta.label}
+            </span>
+            <span className="font-medium text-foreground/90">{author}</span>
+            <span>· saved {timeAgo(item.savedAt)}</span>
           </div>
+          <h1 className="text-[26px] font-bold leading-tight tracking-tight text-balance">{title}</h1>
+          <StatusBanner item={item} busy={reprocessMutation.isPending} onRetry={reprocess} />
+        </header>
+
+        <div className="flex gap-2">
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="pressable flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-foreground font-semibold text-background"
+          >
+            Open on {meta.label} <ArrowUpRight className="h-4 w-4" />
+          </a>
+          <button
+            type="button"
+            onClick={() => shareItem(item, () => successToast('Link copied'))}
+            className="pressable flex h-12 w-12 items-center justify-center rounded-2xl border bg-card"
+            aria-label="Share"
+          >
+            <Share className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditOpen(true)}
+            className="pressable flex h-12 w-12 items-center justify-center rounded-2xl border bg-card"
+            aria-label="Edit"
+          >
+            <Pencil className="h-5 w-5" />
+          </button>
+        </div>
+
+        {summary && (
+          <section className="rounded-[22px] border bg-card p-4">
+            <h2 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-primary">
+              <Sparkles className="h-4 w-4" /> AI summary
+            </h2>
+            <p className="text-[15.5px] leading-relaxed">{summary}</p>
+          </section>
         )}
 
-        <CardContent className="p-6 space-y-6">
-          {/* Title & Meta */}
-          <div>
-            {isEditing ? (
-              <div className="space-y-3">
-                <label className="block space-y-1">
-                  <span className="text-sm font-medium text-muted-foreground">Title</span>
-                  <Input value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} placeholder="Title" />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-medium text-muted-foreground">Your note</span>
-                  <textarea
-                    value={draft.userNote}
-                    onChange={e => setDraft(d => ({ ...d, userNote: e.target.value }))}
-                    rows={4}
-                    placeholder="Why did you save this?"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-medium text-muted-foreground">Tags (comma separated)</span>
-                  <Input value={draft.tags} onChange={e => setDraft(d => ({ ...d, tags: e.target.value }))} placeholder="recipe, dinner, italian" />
-                </label>
-                <div className="flex gap-2">
-                  <Button onClick={handleSave} disabled={updateMutation.isPending}>
-                    {updateMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
-                    Save
-                  </Button>
-                  <Button variant="ghost" onClick={() => setIsEditing(false)} disabled={updateMutation.isPending}>Cancel</Button>
-                </div>
-              </div>
-            ) : (
-            <h1 className="text-2xl font-bold">{displayTitle(item)}</h1>
-            )}
-            <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Calendar className="h-4 w-4" />
-                Saved {formatDistanceToNow(new Date(item.savedAt), { addSuffix: true })}
-              </span>
-              {item.publishedAt && (
-                <span className="flex items-center gap-1">
-                  <Globe className="h-4 w-4" />
-                  Published {format(new Date(item.publishedAt), 'MMM d, yyyy')}
-                </span>
-              )}
-              <span className="flex items-center gap-1">
-                <User className="h-4 w-4" />
-                {displayAuthor(item) || 'Unknown'}
-              </span>
-            </div>
+        {Object.entries(entities).map(([type, data]) => (
+          <EntityDetail key={type} type={type} data={data as Record<string, any>} />
+        ))}
 
-            {!isEditing && (
-              <div className="flex flex-wrap gap-2 mt-4">
-                <Button variant="outline" size="sm" onClick={startEditing}>
-                  <Pencil className="h-4 w-4 mr-1" />
-                  Edit
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleReprocess} disabled={reprocessMutation.isPending}>
-                  <RefreshCw className={cn('h-4 w-4 mr-1', reprocessMutation.isPending && 'animate-spin')} />
-                  {reprocessMutation.isPending ? 'Re-running AI…' : 'Re-run AI'}
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleCopy}>
-                  <Copy className="h-4 w-4 mr-1" />
-                  Copy link
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDelete}
-                  disabled={deleteMutation.isPending}
-                  className="text-destructive hover:text-destructive"
-                >
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  Delete
-                </Button>
-              </div>
-            )}
+        <section className="rounded-[22px] border bg-card p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-[13px] font-semibold text-muted-foreground">Your note</h2>
+            <button type="button" onClick={() => setEditOpen(true)} className="text-[13px] font-medium text-primary">
+              {note ? 'Edit' : 'Add'}
+            </button>
           </div>
-
-          {/* Tags */}
-          <div>
-            <h3 className="text-sm font-medium text-muted-foreground mb-2">Tags</h3>
-            <div className="flex flex-wrap gap-2">
-              {item.tags.map((tag: string) => (
-                <Badge key={tag} variant="secondary">{tag}</Badge>
-              ))}
-              {item.enrichmentStatus === 'pending' && (
-                <Badge variant="outline" title={item.enrichmentError ?? undefined}>
-                  <Clock className="h-3 w-3 mr-1" /> Waiting for AI · retries automatically
-                </Badge>
-              )}
-              {item.enrichmentStatus === 'failed' && (
-                <Badge variant="outline" className="text-destructive border-destructive/40" title={item.enrichmentError ?? undefined}>
-                  <AlertCircle className="h-3 w-3 mr-1" /> AI processing failed · tap Re-run AI
-                </Badge>
-              )}
-            </div>
-          </div>
-
-          {/* Summary */}
-          {item.summary && (
-            <Card className="bg-muted/50">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Sparkles className="h-4 w-4" />
-                  AI Summary
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="whitespace-pre-wrap">{item.summary}</p>
-              </CardContent>
-            </Card>
+          {note ? (
+            <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{note}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">Add why you saved this. It helps search and chat find it later.</p>
           )}
+        </section>
 
-          {/* User Note */}
-          {item.userNote && (
-            <Card className="border-primary/20">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Tag className="h-4 w-4" />
-                  Your Note
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="whitespace-pre-wrap">{decodeEntities(item.userNote)}</p>
-              </CardContent>
-            </Card>
+        {tags.length > 0 && (
+          <section className="flex flex-wrap gap-2">
+            {tags.map(tag => (
+              <Link key={tag} to={`/search?tag=${encodeURIComponent(tag)}`} className="chip">#{tag}</Link>
+            ))}
+          </section>
+        )}
+
+        <section className="space-y-2">
+          <h2 className="section-label">More like this</h2>
+          {related.isLoading && [0, 1].map(i => <SaveRowSkeleton key={i} />)}
+          {!related.isLoading && (related.data?.items.length ?? 0) === 0 && (
+            <p className="text-sm text-muted-foreground">Nothing similar yet. Related saves show up as your library grows.</p>
           )}
+          {related.data?.items.map(r => <SaveRow key={r.id} item={r} />)}
+        </section>
 
-          {/* Entities */}
-          {item.entities && Object.keys(item.entities).length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Brain className="h-4 w-4" />
-                  Extracted Entities
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {Object.entries(item.entities).map(([key, value]: [string, any]) => (
-                    <EntityCard key={key} type={key} data={value} />
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+        <footer className="space-y-1 border-t pt-4 text-xs text-muted-foreground">
+          <p>Saved {format(new Date(item.savedAt), "MMMM d, yyyy 'at' h:mm a")}</p>
+          <p className="truncate">{hostnameOf(item.url)}</p>
+        </footer>
+      </div>
 
-          {/* Original URL */}
-          <div className="pt-4 border-t flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Globe className="h-4 w-4" />
-              <span className="truncate max-w-xs">{item.url}</span>
-            </div>
-            <Button variant="outline" size="sm" onClick={handleOpen}>
-              <ExternalLink className="h-4 w-4 mr-1" />
-              Open Original
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Actions menu */}
+      <Sheet open={menuOpen} onClose={() => setMenuOpen(false)}>
+        <div className="divide-y overflow-hidden rounded-2xl border bg-elevated">
+          <MenuRow icon={Pencil} label="Edit title, note & tags" onClick={() => { setMenuOpen(false); setEditOpen(true); }} />
+          <MenuRow icon={RefreshCw} label="Re-run AI" hint="Fresh summary, tags and details" onClick={reprocess} />
+          <MenuRow icon={Copy} label="Copy link" onClick={() => { setMenuOpen(false); void copyLink(); }} />
+        </div>
+        <div className="mt-3 overflow-hidden rounded-2xl border bg-elevated">
+          <MenuRow icon={Trash2} label="Delete save" danger onClick={() => { setMenuOpen(false); setConfirmDelete(true); }} />
+        </div>
+      </Sheet>
 
-      {/* Related Items */}
-      <RelatedItems itemId={id} tags={item.tags} />
+      {/* Delete confirmation */}
+      <Sheet open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete this save?">
+        <p className="text-sm text-muted-foreground">&ldquo;{title}&rdquo; will be removed from CURIO. This can&rsquo;t be undone.</p>
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => setConfirmDelete(false)} className="h-12 rounded-2xl border bg-elevated font-semibold">Cancel</button>
+          <button
+            type="button"
+            onClick={remove}
+            disabled={deleteMutation.isPending}
+            className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-destructive font-semibold text-white disabled:opacity-60"
+          >
+            {deleteMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Delete
+          </button>
+        </div>
+      </Sheet>
+
+      <EditSheet
+        open={editOpen}
+        item={item}
+        saving={updateMutation.isPending}
+        onClose={() => setEditOpen(false)}
+        onSave={edits =>
+          updateMutation.mutate(
+            { id: item.id, edits },
+            {
+              onSuccess: updated => { setItem(updated); setEditOpen(false); successToast('Saved'); },
+              onError: e => errorToast('Couldn’t save changes', e instanceof Error ? e.message : undefined),
+            },
+          )
+        }
+      />
+    </article>
+  );
+}
+
+function StatusBanner({ item, busy, onRetry }: { item: SavedItem; busy: boolean; onRetry: () => void }) {
+  if (item.enrichmentStatus === 'enriched' && !busy) return null;
+  const failed = item.enrichmentStatus === 'failed';
+  return (
+    <div className={cn('flex items-center gap-3 rounded-2xl p-3 text-sm', failed ? 'bg-destructive/15 text-destructive' : 'bg-warning/15 text-warning')}>
+      {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : failed ? <AlertCircle className="h-4 w-4 shrink-0" /> : <Clock className="h-4 w-4 shrink-0" />}
+      <span className="flex-1">
+        {busy ? 'Reading it again…' : failed ? 'CURIO couldn’t read this one.' : 'Still being read. CURIO retries automatically.'}
+      </span>
+      {!busy && (
+        <button type="button" onClick={onRetry} className="rounded-full bg-background/40 px-3 py-1 text-xs font-semibold">
+          Retry now
+        </button>
+      )}
     </div>
   );
 }
 
-function EntityCard({ type, data }: { type: string; data: any }) {
-  const icons: Record<string, any> = {
-    recipe: '🍳',
-    product: '🛍️',
-    place: '📍',
-    event: '📅',
-    workout: '💪',
+function MenuRow({ icon: Icon, label, hint, danger, onClick }: { icon: typeof Pencil; label: string; hint?: string; danger?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className={cn('flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-accent', danger && 'text-destructive')}>
+      <Icon className="h-5 w-5 shrink-0" />
+      <span className="flex-1">
+        <span className="block font-medium">{label}</span>
+        {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
+      </span>
+    </button>
+  );
+}
+
+function EntityDetail({ type, data }: { type: string; data: Record<string, any> }) {
+  const known = isCollectionType(type) ? COLLECTIONS[type] : null;
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter(Boolean).map(String) : []);
+
+  return (
+    <section className={cn('rounded-[22px] border bg-gradient-to-br p-4', known?.tint ?? 'from-card to-card')}>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <span aria-hidden="true">{known?.emoji ?? '📦'}</span>
+          {data.name || (known ? known.singular : type)}
+        </h2>
+        {known && (
+          <Link to={`/collections/${type}`} className="text-xs font-medium text-muted-foreground hover:text-foreground">
+            {known.title} →
+          </Link>
+        )}
+      </div>
+
+      {type === 'recipe' && (
+        <div className="space-y-3 text-[15px]">
+          {(data.cuisine || list(data.dietTags).length > 0) && (
+            <p className="text-sm text-muted-foreground">{[data.cuisine, ...list(data.dietTags)].filter(Boolean).join(' · ')}</p>
+          )}
+          {list(data.ingredients).length > 0 && (
+            <div>
+              <h3 className="mb-1.5 text-[13px] font-semibold text-muted-foreground">Ingredients</h3>
+              <ul className="space-y-1">
+                {list(data.ingredients).map((ing, i) => (
+                  <li key={i} className="flex gap-2"><span className="text-primary">•</span>{ing}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {list(data.instructions).length > 0 && (
+            <div>
+              <h3 className="mb-1.5 text-[13px] font-semibold text-muted-foreground">Steps</h3>
+              <ol className="space-y-2">
+                {list(data.instructions).map((step, i) => (
+                  <li key={i} className="flex gap-3">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-background/60 text-xs font-bold">{i + 1}</span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </div>
+      )}
+
+      {type === 'place' && (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">{data.address || 'Address not found in the post'}</p>
+          <a href={mapsUrl(data)} target="_blank" rel="noopener noreferrer" className="pressable flex shrink-0 items-center gap-1.5 rounded-full bg-foreground px-3.5 py-2 text-xs font-semibold text-background">
+            <MapPin className="h-3.5 w-3.5" /> Open in Maps
+          </a>
+        </div>
+      )}
+
+      {type === 'event' && (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            {[formatMaybeDate(data.startAt), data.location].filter(Boolean).join(' · ') || 'Date not found in the post'}
+          </p>
+          <a href={calendarUrl(data)} target="_blank" rel="noopener noreferrer" className="pressable flex shrink-0 items-center gap-1.5 rounded-full bg-foreground px-3.5 py-2 text-xs font-semibold text-background">
+            <CalendarPlus className="h-3.5 w-3.5" /> Add to calendar
+          </a>
+        </div>
+      )}
+
+      {type === 'product' && (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">{[data.brand, data.price ? `${data.currency ?? ''}${data.price}`.trim() : null].filter(Boolean).join(' · ')}</p>
+          {data.url && (
+            <a href={data.url} target="_blank" rel="noopener noreferrer" className="pressable flex shrink-0 items-center gap-1.5 rounded-full bg-foreground px-3.5 py-2 text-xs font-semibold text-background">
+              View product <ArrowUpRight className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </div>
+      )}
+
+      {type === 'workout' && (
+        <p className="text-sm text-muted-foreground">
+          {[data.type, data.duration, list(data.equipment).length ? `Equipment: ${list(data.equipment).join(', ')}` : null].filter(Boolean).join(' · ')}
+        </p>
+      )}
+
+      {!known && (
+        <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
+          {Object.entries(data).filter(([k, v]) => k !== 'name' && v != null && v !== '').map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="capitalize text-muted-foreground">{k}</dt>
+              <dd>{Array.isArray(v) ? v.join(', ') : String(v)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  );
+}
+
+function formatMaybeDate(value: unknown): string | null {
+  if (typeof value !== 'string' || !value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? value : format(d, 'EEE, MMM d · h:mm a');
+}
+
+function EditSheet({
+  open, item, saving, onClose, onSave,
+}: {
+  open: boolean;
+  item: SavedItem;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (edits: { title: string | null; userNote: string | null; tags: string[] }) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [note, setNote] = useState('');
+  const [tags, setTags] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle(decodeEntities(item.title));
+    setNote(decodeEntities(item.userNote));
+    setTags((item.tags ?? []).join(', '));
+  }, [open, item]);
+
+  const submit = () => {
+    const cleanTags = [...new Set(tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean))];
+    onSave({ title: title.trim() || null, userNote: note.trim() || null, tags: cleanTags });
   };
 
+  const field = 'w-full rounded-2xl border bg-elevated px-3 py-3 text-[16px] placeholder:text-muted-foreground focus:border-primary/60 focus:outline-none';
+
   return (
-    <div className="p-3 rounded-lg bg-muted/50">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-lg">{icons[type] || '📦'}</span>
-        <span className="font-medium capitalize">{type}</span>
+    <Sheet open={open} onClose={onClose} title="Edit save">
+      <div className="space-y-3">
+        <label className="block space-y-1.5">
+          <span className="text-[13px] font-medium text-muted-foreground">Title</span>
+          <input value={title} onChange={e => setTitle(e.target.value)} className={field} placeholder="Title" />
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-[13px] font-medium text-muted-foreground">Your note</span>
+          <textarea value={note} onChange={e => setNote(e.target.value)} rows={4} className={cn(field, 'resize-none')} placeholder="Why did you save this?" />
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-[13px] font-medium text-muted-foreground">Tags, separated by commas</span>
+          <input value={tags} onChange={e => setTags(e.target.value)} className={field} placeholder="recipe, dinner, italian" autoCapitalize="off" />
+        </label>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={saving}
+          className="pressable flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-primary font-semibold text-primary-foreground disabled:opacity-50"
+        >
+          {saving && <Loader2 className="h-4 w-4 animate-spin" />} Save changes
+        </button>
       </div>
-      <dl className="grid grid-cols-2 gap-2 text-sm">
-        {Object.entries(data).map(([key, value]) => (
-          value != null && value !== '' && (
-            <Fragment key={key}>
-              <dt className="text-muted-foreground">{key.charAt(0).toUpperCase() + key.slice(1)}</dt>
-              <dd className="font-medium">{Array.isArray(value) ? value.join(', ') : String(value)}</dd>
-            </Fragment>
-          )
-        ))}
-      </dl>
-    </div>
-  );
-}
-
-function RelatedItems({ itemId, tags }: { itemId: string; tags: string[] }) {
-  const { data } = useQuery({
-    queryKey: ['related', itemId, tags],
-    queryFn: async () => {
-      if (tags.length === 0) return { items: [] };
-      const result = await searchItems({ tags: tags.slice(0, 3), limit: 10 });
-      return result;
-    },
-    enabled: tags.length > 0,
-  });
-
-  if (!data?.items.length) return null;
-
-  const related = data.items.filter((i: any) => i.id !== itemId).slice(0, 4);
-  if (!related.length) return null;
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Related Saves</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {related.map((item: any) => (
-            <Link
-              key={item.id}
-              to={`/item/${item.id}`}
-              className="p-3 rounded-lg border hover:bg-accent transition-colors group"
-            >
-              <div className="flex items-start gap-3">
-                {item.thumbnailUrl && (
-                  <img src={item.thumbnailUrl} alt="" className="h-16 w-16 rounded object-cover group-hover:scale-105 transition-transform" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium line-clamp-1 group-hover:text-primary">{displayTitle(item)}</p>
-                  <p className="text-xs text-muted-foreground">{item.platform}</p>
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+    </Sheet>
   );
 }

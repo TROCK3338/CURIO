@@ -22,7 +22,15 @@ export function useSettings() {
   // Load settings on mount
   useEffect(() => {
     const load = async () => {
-      const stored = await getSettings();
+      let stored = await getSettings();
+      // First launch of the redesigned app: start in dark mode (the new default)
+      let themeKnown = false;
+      try { themeKnown = localStorage.getItem(THEME_STORAGE_KEY) !== null; } catch { /* private mode */ }
+      if (!themeKnown && stored.theme !== 'dark') {
+        stored = { ...stored, theme: 'dark' };
+        await saveSettings(stored);
+      }
+      applyTheme(stored.theme);
       setSettingsState(stored);
       await initializeSync(stored);
       setSyncStatus(getSyncStatus());
@@ -93,15 +101,20 @@ export function useSettings() {
    Theme Application
    ============================================ */
 
-function applyTheme(theme: UserSettings['theme']): void {
+const THEME_STORAGE_KEY = 'curio.theme';
+
+export function applyTheme(theme: UserSettings['theme']): void {
   const root = document.documentElement;
   const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const dark = theme === 'dark' || (theme === 'system' && systemDark);
+  root.classList.toggle('dark', dark);
 
-  if (theme === 'system') {
-    root.classList.toggle('dark', systemDark);
-  } else {
-    root.classList.toggle('dark', theme === 'dark');
-  }
+  // Remembered for the pre-paint script in index.html
+  try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch { /* private mode */ }
+
+  // Match the browser / status bar chrome to the app background
+  const meta = document.querySelector('meta[name="theme-color"]');
+  meta?.setAttribute('content', dark ? '#0b0a10' : '#f9f9fb');
 }
 
 /* ============================================

@@ -127,7 +127,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   syncEnabled: true,
   syncIntervalMinutes: 15,
   wifiOnlySync: true,
-  theme: 'system',
+  theme: 'dark',
   defaultView: 'timeline',
   itemsPerPage: 20,
   analyticsEnabled: false,

@@ -70,6 +70,21 @@ export interface SearchParams {
   limit?: number;
   offset?: number;
   semantic?: boolean;
+  /** Smart collection: recipe | place | product | event | workout */
+  entity?: string;
+  /** Saves similar to this item id */
+  relatedTo?: string;
+}
+
+export interface LibraryFacets {
+  total: number;
+  platforms: Record<string, number>;
+  entities: Record<string, number>;
+  tags: Array<{ tag: string; count: number }>;
+}
+
+export async function getFacets(): Promise<LibraryFacets> {
+  return fetchJson<LibraryFacets>('/search?facets=1');
 }
 
 export async function searchItems(params: SearchParams = {}): Promise<SearchResponse> {
@@ -159,6 +174,32 @@ export async function reprocessItem(id: string): Promise<SavedItem> {
     method: 'POST',
     body: JSON.stringify({ action: 'reprocess' }),
   });
+}
+
+/** Re-scrape an item's preview image (social CDN links expire). */
+export async function refreshItemMedia(id: string): Promise<SavedItem & { refreshed?: boolean }> {
+  return fetchJson<SavedItem & { refreshed?: boolean }>(`/items/${encodeURIComponent(id)}`, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'refresh-media' }),
+  });
+}
+
+/** Downloads every save as JSON (authenticated, unlike a plain link). */
+export async function downloadExport(): Promise<void> {
+  const token = getAuthToken ? await getAuthToken() : null;
+  const response = await fetch(`${API_BASE}/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) throw new ApiError(response.status, `Export failed (${response.status})`);
+  const blob = await response.blob();
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = `curio-export-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
 /* ============================================

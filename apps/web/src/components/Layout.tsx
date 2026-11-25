@@ -1,238 +1,136 @@
-import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { useState, useEffect, useRef } from 'react';
+import { createContext, useCallback, useContext, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { UserButton } from '@clerk/react';
+import { Home, Layers, MessageCircle, Plus, Search, Settings2 } from 'lucide-react';
 import { cn } from '../utils/cn';
-import { Button } from './ui/Button';
-import { Search, Menu, Settings, MessageSquare, Home } from 'lucide-react';
-import { useSettings, useKeyboardShortcuts } from '../hooks/useSettings';
-import { useInfoToast } from './ui/Toast';
+import { useKeyboardShortcuts, useSettings } from '../hooks/useSettings';
+import { SaveSheet } from './SaveSheet';
+
+const SaveSheetContext = createContext<(url?: string) => void>(() => {});
+
+/** Opens the global "Save a link" sheet from anywhere in the app. */
+export function useOpenSaveSheet() {
+  return useContext(SaveSheetContext);
+}
+
+const TABS = [
+  { path: '/', label: 'Home', icon: Home },
+  { path: '/search', label: 'Search', icon: Search },
+  { path: '#save', label: 'Save', icon: Plus },
+  { path: '/collections', label: 'Collections', icon: Layers },
+  { path: '/chat', label: 'Ask', icon: MessageCircle },
+] as const;
 
 export function Layout() {
   const location = useLocation();
-  const routerNavigate = useNavigate();
+  const navigate = useNavigate();
   const { syncStatus } = useSettings();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveUrl, setSaveUrl] = useState('');
 
-  // Keyboard shortcuts
+  const openSave = useCallback((url = '') => {
+    setSaveUrl(url);
+    setSaveOpen(true);
+  }, []);
+
   useKeyboardShortcuts({
-    search: () => setCommandPaletteOpen(true),
+    search: () => navigate('/search'),
     chat: () => navigate('/chat'),
-    escape: () => { setCommandPaletteOpen(false); setSidebarOpen(false); },
+    escape: () => setSaveOpen(false),
   });
 
-  const navigate = (path: string) => {
-    routerNavigate(path);
-    setSidebarOpen(false);
-  };
+  // Item pages have a full-bleed hero with their own floating controls
+  const immersive = location.pathname.startsWith('/item/');
+  const isChat = location.pathname.startsWith('/chat');
+  const pending = syncStatus.isSyncing || syncStatus.queuedCount > 0;
 
-  const navItems = [
-    { path: '/', label: 'Home', icon: Home },
-    { path: '/search', label: 'Search', icon: Search },
-    { path: '/chat', label: 'Chat', icon: MessageSquare },
-    { path: '/settings', label: 'Settings', icon: Settings },
-  ];
+  const isActive = (path: string) =>
+    path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
 
   return (
-    <div className="min-h-screen bg-background font-sans">
-      {/* Mobile Sidebar */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-          aria-hidden="true"
-        />
-      )}
-
-      <aside
-        className={cn(
-          'fixed left-0 top-0 z-50 h-screen w-64 border-r bg-card',
-          'transform transition-transform duration-300 lg:translate-x-0',
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        )}
-        aria-label="Navigation"
-      >
-        <div className="flex h-full flex-col">
-          {/* Header */}
-          <div className="flex h-16 items-center gap-3 border-b px-4">
-            <img
-              src="/icons/icon-72x72.png"
-              alt="CURIO logo"
-              className="h-8 w-8 rounded-lg object-cover"
-            />
-            <span className="font-semibold text-lg">CURIO</span>
-          </div>
-
-          {/* Navigation */}
-          <nav className="flex-1 space-y-1 p-3" aria-label="Main navigation">
-            {navItems.map(item => {
-              const Icon = item.icon;
-              const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
-              return (
+    <SaveSheetContext.Provider value={openSave}>
+      <div className="min-h-[100dvh] bg-background">
+        <div className="relative mx-auto min-h-[100dvh] max-w-xl sm:border-x sm:border-border/60">
+          {!immersive && (
+            <header className="glass sticky top-0 z-40 pt-safe">
+              <div className="flex h-14 items-center gap-2 px-4">
+                <Link to="/" className="flex items-center gap-2" aria-label="CURIO home">
+                  <img src="/icons/icon-72x72.png" alt="" className="h-7 w-7 rounded-[9px]" />
+                  <span className="font-display text-[26px] italic leading-none tracking-tight">curio</span>
+                </Link>
+                {pending && (
+                  <span
+                    className="ml-1 flex items-center gap-1.5 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary"
+                    title={syncStatus.queuedCount > 0 ? `${syncStatus.queuedCount} waiting to sync` : 'Syncing'}
+                  >
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                    {syncStatus.queuedCount > 0 ? `${syncStatus.queuedCount} queued` : 'Syncing'}
+                  </span>
+                )}
+                <div className="flex-1" />
                 <NavLink
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => setSidebarOpen(false)}
-                  className={cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-                    isActive
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                  )}
-                  aria-current={isActive ? 'page' : undefined}
+                  to="/settings"
+                  className={({ isActive: active }) =>
+                    cn('rounded-full p-2 text-muted-foreground hover:bg-accent hover:text-foreground', active && 'text-foreground')
+                  }
+                  aria-label="Settings"
                 >
-                  <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-                  {item.label}
+                  <Settings2 className="h-5 w-5" />
                 </NavLink>
-              );
-            })}
-          </nav>
-
-          {/* Sync Status & Account */}
-          <div className="border-t p-3 space-y-3">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Sync</span>
-              <span className={cn(
-                'flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium',
-                syncStatus.isSyncing ? 'bg-primary/10 text-primary' : 'bg-green-500/10 text-green-500'
-              )}>
-                <span className={cn('h-1.5 w-1.5 rounded-full', syncStatus.isSyncing ? 'bg-primary animate-pulse' : 'bg-green-500')} />
-                {syncStatus.isSyncing ? 'Syncing' : 'Synced'}
-              </span>
-            </div>
-            {syncStatus.queuedCount > 0 && (
-              <p className="text-xs text-muted-foreground">{syncStatus.queuedCount} queued</p>
-            )}
-            <div className="flex items-center justify-between pt-2 border-t">
-              <span className="text-xs text-muted-foreground">Account</span>
-              <UserButton />
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="lg:pl-64 min-h-screen pb-24 lg:pb-8">
-        {/* Mobile Header */}
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/90 backdrop-blur-md lg:hidden px-4">
-          <img
-            src="/icons/icon-72x72.png"
-            alt="CURIO logo"
-            className="h-7 w-7 rounded-lg object-cover"
-          />
-          <div className="flex-1 font-semibold tracking-tight">CURIO</div>
-          <Button variant="ghost" size="icon" onClick={() => setCommandPaletteOpen(true)} aria-label="Search">
-            <Search className="h-5 w-5" />
-          </Button>
-          <UserButton />
-        </header>
-
-        <div className="mx-auto max-w-6xl p-4 sm:p-6 pt-safe">
-          <Outlet />
-        </div>
-      </main>
-
-      {/* Mobile Floating Glass Bottom Navigation */}
-      <nav
-        aria-label="Mobile navigation"
-        className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 mx-auto max-w-md rounded-full border border-white/25 dark:border-white/10 bg-card/75 backdrop-blur-xl saturate-150 shadow-[0_8px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5 dark:ring-white/5 px-2 py-1.5 flex items-center justify-around lg:hidden"
-      >
-        {navItems.map(item => {
-          const Icon = item.icon;
-          const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
-          return (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={cn(
-                'flex flex-col items-center justify-center gap-0.5 rounded-full px-4 py-1.5 text-[11px] font-medium transition-all',
-                isActive
-                  ? 'bg-primary/15 text-primary shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-              aria-current={isActive ? 'page' : undefined}
-            >
-              <Icon className="h-5 w-5" aria-hidden="true" />
-              <span>{item.label}</span>
-            </NavLink>
-          );
-        })}
-      </nav>
-
-      {/* Command Palette */}
-      {commandPaletteOpen && (
-        <CommandPalette onClose={() => setCommandPaletteOpen(false)} />
-      )}
-    </div>
-  );
-}
-
-/* Command Palette Component */
-function CommandPalette({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate();
-  const infoToast = useInfoToast();
-  const [query, setQuery] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    const handleEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
-  }, [onClose]);
-
-  const actions = [
-    { label: 'Search', path: '/search', shortcut: '⌘K' },
-    { label: 'Chat with saves', path: '/chat', shortcut: '⌘N' },
-    { label: 'Settings', path: '/settings', shortcut: '⌘,' },
-    { label: 'New save (share sheet)', path: '#share', shortcut: 'Share from any app' },
-  ];
-
-  const filtered = actions.filter(a => a.label.toLowerCase().includes(query.toLowerCase()));
-
-  const handleAction = (path: string) => {
-    if (path === '#share') {
-      infoToast('Use the share sheet from any app (Instagram, TikTok, Safari, etc.)');
-    } else {
-      navigate(path);
-    }
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 pointer-events-none">
-      <div className="pointer-events-auto w-full max-w-md rounded-xl border bg-card shadow-xl overflow-hidden animate-in fade-in zoom-in-95">
-        <div className="relative p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Type a command or search..."
-              className="w-full h-10 pl-10 pr-4 rounded-lg border bg-background text-foreground placeholder:text-muted-foreground"
-              autoFocus
-            />
-            <kbd className="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 text-xs text-muted-foreground bg-muted rounded">Esc</kbd>
-          </div>
-        </div>
-        <div className="max-h-60 overflow-auto">
-          {filtered.map(action => (
-            <button
-              key={action.label}
-              onClick={() => handleAction(action.path)}
-              className="w-full flex items-center justify-between px-4 py-3 text-left text-sm hover:bg-accent focus:bg-accent focus:outline-none"
-            >
-              <span>{action.label}</span>
-              <span className="text-xs text-muted-foreground">{action.shortcut}</span>
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <div className="px-4 py-3 text-sm text-muted-foreground">No commands found</div>
+                <div className="flex h-8 w-8 items-center justify-center">
+                  <UserButton />
+                </div>
+              </div>
+            </header>
           )}
+
+          <main className={cn(isChat ? '' : 'pb-32', !immersive && !isChat && 'px-4 pt-2')}>
+            <Outlet />
+          </main>
+
+          {/* Floating tab bar */}
+          <nav
+            aria-label="Main"
+            className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-xl px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+          >
+            <div className="glass flex items-center justify-between rounded-[26px] border border-white/10 px-2 py-1.5 shadow-[0_10px_40px_rgba(0,0,0,0.35)]">
+              {TABS.map(tab => {
+                const Icon = tab.icon;
+                if (tab.path === '#save') {
+                  return (
+                    <button
+                      key="save"
+                      type="button"
+                      onClick={() => openSave()}
+                      className="pressable -my-4 flex h-14 w-14 items-center justify-center rounded-[20px] bg-primary text-primary-foreground shadow-[0_8px_24px_hsl(var(--primary)/0.45)]"
+                      aria-label="Save a link"
+                    >
+                      <Plus className="h-7 w-7" strokeWidth={2.5} />
+                    </button>
+                  );
+                }
+                const active = isActive(tab.path);
+                return (
+                  <NavLink
+                    key={tab.path}
+                    to={tab.path}
+                    className={cn(
+                      'flex w-16 flex-col items-center gap-0.5 rounded-2xl py-1.5 text-[10.5px] font-medium transition-colors',
+                      active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                    aria-current={active ? 'page' : undefined}
+                  >
+                    <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 2.4 : 1.8} />
+                    {tab.label}
+                  </NavLink>
+                );
+              })}
+            </div>
+          </nav>
         </div>
+
+        <SaveSheet open={saveOpen} onClose={() => setSaveOpen(false)} initialUrl={saveUrl} />
       </div>
-    </div>
+    </SaveSheetContext.Provider>
   );
 }
