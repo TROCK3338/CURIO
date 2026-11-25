@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Download,
   HardDrive,
+  Zap,
   Loader2,
   LogOut,
   Monitor,
@@ -24,6 +25,7 @@ import { addToQueue, clearAllItems } from '../services/indexeddb';
 import { triggerManualSync } from '../services/sync';
 import { findUrl } from '../services/save';
 import { Sheet } from '../components/Sheet';
+import { QuickSaveSetup } from '../components/QuickSaveSetup';
 import { Switch } from '../components/ui/Switch';
 import { useErrorToast, useInfoToast, useSuccessToast } from '../components/ui/Toast';
 import { cn } from '../utils/cn';
@@ -79,6 +81,7 @@ export function SettingsPage() {
   const [exporting, setExporting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [quickSaveOpen, setQuickSaveOpen] = useState(false);
 
   const installed =
     window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
@@ -182,7 +185,8 @@ export function SettingsPage() {
       </Group>
 
       <Group title="Saving" footer="CURIO appears in your share sheet once it's installed on your phone.">
-        <Row icon={Share2} label="Set up sharing from other apps" hint="Instagram, YouTube, Safari, iOS Shortcut" to="/welcome" />
+        <Row icon={Zap} label="iPhone quick save" hint="Share to CURIO without leaving the app you’re in" onClick={() => setQuickSaveOpen(true)} />
+        <Row icon={Share2} label="Set up sharing from other apps" hint="Instagram, YouTube, Safari, Android share sheet" to="/welcome?step=share" />
         <Row
           icon={Smartphone}
           label={installed ? 'Installed on this device' : 'Install the app'}
@@ -226,6 +230,10 @@ export function SettingsPage() {
       <p className="pb-4 text-center text-xs text-muted-foreground">
         <span className="font-display text-base italic text-foreground">curio</span> · your saves, made findable
       </p>
+
+      <Sheet open={quickSaveOpen} onClose={() => setQuickSaveOpen(false)} title="iPhone quick save">
+        <QuickSaveSetup />
+      </Sheet>
 
       <Sheet open={confirmClear} onClose={() => setConfirmClear(false)} title="Clear device cache?">
         <p className="text-sm text-muted-foreground">

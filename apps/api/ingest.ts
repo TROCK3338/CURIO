@@ -22,6 +22,16 @@ const IngestSchema = z.object({
   userNote: z.string().optional(),
 });
 
+/** One-line text for the iOS Shortcut's "Show Notification" step. */
+function notificationText(prefix: string, title: string | null, platform: string): string {
+  const clean = (title ?? '')
+    .replace(/^.+?\s+on\s+Instagram:?\s*/i, '')
+    .replace(/^["\u201c]|["\u201d]$/g, '')
+    .trim();
+  const label = clean || `${platform === 'generic' ? 'Link' : platform.charAt(0).toUpperCase() + platform.slice(1)} saved`;
+  return `${prefix} \u2713 ${label.length > 80 ? `${label.slice(0, 77)}\u2026` : label}`;
+}
+
 // ============================================
 // Handler
 // ============================================
@@ -38,7 +48,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
-  const userId = await requireAuth(req, res);
+  // The iOS Shortcut saves with a personal save key instead of a browser session
+  const userId = await requireAuth(req, res, { allowSaveKey: true });
   if (!userId) return;
 
   try {
@@ -112,6 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           success: true,
           item: savedItem,
           message: 'Already saved',
+          notification: notificationText('Already in CURIO', savedItem.title, savedItem.platform),
         });
       }
       // Saved earlier but never fully processed: fall through and finish the job
@@ -138,6 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       success: true,
       item: responseItem,
+      notification: notificationText('Saved to CURIO', responseItem.title, responseItem.platform),
     } as IngestResponse);
 
   } catch (error) {

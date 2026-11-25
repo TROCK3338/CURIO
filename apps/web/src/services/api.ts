@@ -203,6 +203,34 @@ export async function downloadExport(): Promise<void> {
 }
 
 /* ============================================
+   Personal save keys (iOS Shortcut silent save)
+   ============================================ */
+
+export interface SaveKeySummary {
+  id: string;
+  label: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export async function listSaveKeys(): Promise<SaveKeySummary[]> {
+  return (await fetchJson<{ keys: SaveKeySummary[] }>('/keys')).keys;
+}
+
+/** Returns the full key; it is never shown again. */
+export async function createSaveKey(label: string): Promise<SaveKeySummary & { key: string }> {
+  return fetchJson<SaveKeySummary & { key: string }>('/keys', {
+    method: 'POST',
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function revokeSaveKey(id: string): Promise<void> {
+  await fetchJson<{ success: boolean }>(`/keys?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/* ============================================
    Health Check
    ============================================ */
 

@@ -59,7 +59,7 @@ export function Sheet({ open, onClose, title, children, className }: SheetProps)
             </button>
           </div>
         )}
-        <div className="px-5 pb-5 pt-2">{children}</div>
+        <div className="max-h-[calc(85dvh-4rem)] overflow-y-auto overscroll-contain px-5 pb-5 pt-2">{children}</div>
       </div>
     </div>,
     document.body,

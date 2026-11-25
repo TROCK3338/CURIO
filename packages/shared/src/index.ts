@@ -144,6 +144,8 @@ export interface IngestResponse {
   item?: SavedItem;
   error?: string;
   message?: string;
+  /** Short line for the iOS Shortcut notification */
+  notification?: string;
 }
 
 export interface SearchRequest {

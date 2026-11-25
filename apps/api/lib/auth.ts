@@ -5,6 +5,8 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { verifyToken } from '@clerk/backend';
+import { looksLikeSaveKey, verifySaveKey } from './apiKeys.js';
+import { initializeSchema } from './db.js';
 
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://curio-omega-tawny.vercel.app',
@@ -36,9 +38,15 @@ export function setCorsHeaders(
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
+export interface AuthOptions {
+  /** Also accept a personal save key (curio_sk_...). Only for routes that save links. */
+  allowSaveKey?: boolean;
+}
+
 export async function requireAuth(
   req: VercelRequest,
   res: VercelResponse,
+  options: AuthOptions = {},
 ): Promise<string | null> {
   const secretKey = process.env.CLERK_SECRET_KEY;
   if (!secretKey) {
@@ -56,6 +64,22 @@ export async function requireAuth(
   const token = authHeader.slice('Bearer '.length).trim();
   if (!token) {
     res.status(401).json({ error: 'Authentication required' });
+    return null;
+  }
+
+  if (looksLikeSaveKey(token)) {
+    if (!options.allowSaveKey) {
+      res.status(403).json({ error: 'Save keys can only be used to save links' });
+      return null;
+    }
+    try {
+      await initializeSchema();
+      const userId = await verifySaveKey(token);
+      if (userId) return userId;
+    } catch (error) {
+      console.error('[Auth] Save key check failed:', error);
+    }
+    res.status(401).json({ error: 'Invalid or revoked save key' });
     return null;
   }
 

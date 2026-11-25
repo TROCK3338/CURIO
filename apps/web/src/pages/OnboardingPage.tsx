@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, Check, Copy, Loader2, MessageCircle, Search, Share, Sparkles, PlusSquare, Layers } from 'lucide-react';
+import { ArrowRight, Check, Loader2, MessageCircle, Search, Share, Sparkles, PlusSquare, Layers } from 'lucide-react';
 import { canPromptInstall, deviceKind, isInstalled, markOnboarded, onInstallAvailabilityChange, promptInstall } from '../utils/install';
 import { saveLink } from '../services/save';
-import { useSuccessToast } from '../components/ui/Toast';
+import { QuickSaveSetup } from '../components/QuickSaveSetup';
 import { displayTitle } from '../utils/text';
 import { cn } from '../utils/cn';
 
@@ -168,16 +168,6 @@ function Install() {
 
 function ShareSetup() {
   const kind = deviceKind();
-  const successToast = useSuccessToast();
-  const [copied, setCopied] = useState(false);
-  const shortcutUrl = `${window.location.origin}/share-target?url=`;
-
-  const copy = async () => {
-    await navigator.clipboard?.writeText(shortcutUrl);
-    setCopied(true);
-    successToast('Copied');
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   if (kind !== 'ios') {
     return (
@@ -199,24 +189,12 @@ function ShareSetup() {
 
   return (
     <>
-      <StepHeader emoji="⚡️" title="Add CURIO to your share sheet">
-        iPhone doesn&rsquo;t let web apps join the share sheet directly, so a one-time Shortcut does it.
+      <StepHeader emoji="⚡️" title="Save from your iPhone share sheet">
+        iPhone doesn&rsquo;t let web apps join the share sheet directly, so a one-time Shortcut does it, silently, without leaving the app you&rsquo;re in.
       </StepHeader>
-      <Numbered steps={[
-        <>Open the <b>Shortcuts</b> app and tap <b>+</b> to make a new shortcut. Name it <b>Save to CURIO</b>.</>,
-        <>Tap the <b>ⓘ</b> info button and turn on <b>Show in Share Sheet</b>. Set it to receive <b>URLs</b> and <b>Safari web pages</b>.</>,
-        <>Add the action <b>URL Encode</b> with <b>Shortcut Input</b>.</>,
-        <>Add <b>Open URLs</b> with this link followed by the <b>URL Encoded Text</b> variable:</>,
-      ]} />
-      <button type="button" onClick={copy} className="pressable mt-4 flex items-center gap-3 rounded-2xl border bg-card p-3 text-left">
-        <code className="min-w-0 flex-1 truncate text-[13px]">{shortcutUrl}</code>
-        <span className="flex shrink-0 items-center gap-1 rounded-full bg-elevated px-3 py-1.5 text-xs font-semibold">
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />} {copied ? 'Copied' : 'Copy'}
-        </span>
-      </button>
-      <p className="mt-6 text-sm text-muted-foreground">
-        Now in Instagram, tap <b className="text-foreground">Share → Save to CURIO</b>. The Reel is saved and read automatically.
-      </p>
+      <div className="mt-8">
+        <QuickSaveSetup compact />
+      </div>
     </>
   );
 }
