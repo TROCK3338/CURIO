@@ -5,9 +5,9 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
-import { searchItems, chatWithSaves, getClusters, regenerateClusters, ingestItem, type SearchParams } from '../services/api';
-import { getItemsLocally, saveItemLocally, searchItemsLocally } from '../services/indexeddb';
-import type { SavedItem, SearchResponse, ChatParams, IngestRequest, IngestResponse } from '@mindspace/shared';
+import { searchItems, chatWithSaves, getClusters, regenerateClusters, ingestItem, updateItem, deleteItem, reprocessItem, type SearchParams, type ItemEdits } from '../services/api';
+import { getItemsLocally, saveItemLocally, searchItemsLocally, deleteItemLocally } from '../services/indexeddb';
+import type { SavedItem, SearchResponse, ChatParams, IngestRequest, IngestResponse } from '@curio/shared';
 
 const ITEMS_QUERY_KEY = ['items'] as const;
 
@@ -151,6 +151,60 @@ export function useSaveItem() {
       queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
     },
     onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+    },
+  });
+}
+
+/* ============================================
+   Edit / Delete / Reprocess
+   ============================================ */
+
+export function useUpdateItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, edits }: { id: string; edits: ItemEdits }) => updateItem(id, edits),
+    onSuccess: async (item) => {
+      await saveItemLocally(item);
+      queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+    },
+  });
+}
+
+export function useDeleteItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await deleteItem(id);
+      return id;
+    },
+    onSuccess: async (id) => {
+      await deleteItemLocally(id);
+      // Drop it from every cached list right away, then refetch
+      queryClient.setQueriesData({ queryKey: ITEMS_QUERY_KEY, exact: false }, (old: any) => {
+        if (old?.items) {
+          return { ...old, items: old.items.filter((i: SavedItem) => i.id !== id), total: Math.max(0, (old.total ?? 1) - 1) };
+        }
+        if (old?.pages) {
+          return {
+            ...old,
+            pages: old.pages.map((p: any) => ({ ...p, items: p.items.filter((i: SavedItem) => i.id !== id) })),
+          };
+        }
+        if (Array.isArray(old)) return old.filter((i: SavedItem) => i.id !== id);
+        return old;
+      });
+      queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+    },
+  });
+}
+
+export function useReprocessItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => reprocessItem(id),
+    onSuccess: async (item) => {
+      await saveItemLocally(item);
       queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
     },
   });

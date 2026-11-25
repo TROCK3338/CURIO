@@ -13,7 +13,7 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@mindspace/shared/*": ["../../packages/shared/src/*"]
+      "@curio/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": ["**/*.ts"],

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Send, X, Copy, Check, MessageSquare, Sparkles, Loader2 } from 'lucide-react';
 import { useChat } from '../hooks/useItems';
 import { useSettings } from '../hooks/useSettings';
@@ -9,6 +10,7 @@ import { Badge } from '../components/ui/Badge';
 import { Avatar } from '../components/ui/Avatar';
 import { ScrollArea } from '../components/ui/ScrollArea';
 import { cn } from '../utils/cn';
+import { decodeEntities } from '../utils/text';
 import { useSuccessToast, useErrorToast } from '../components/ui/Toast';
 
 export function ChatPage() {
@@ -193,22 +195,18 @@ function MessageBubble({ message, onCopy }: { message: any; onCopy: (text: strin
 
           {/* Citations */}
           {message.citations && message.citations.length > 0 && (
-            <div className="mt-2 space-y-1">
-              {message.citations.slice(0, 3).map((citation: any, i: number) => (
-                <a
-                  key={i}
-                  href={citation.itemUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+            <div className="mt-2 flex flex-wrap gap-1">
+              {message.citations.map((citation: any, i: number) => (
+                <Link
+                  key={citation.itemId ?? i}
+                  to={`/item/${citation.itemId}`}
+                  title={citation.excerpt || citation.itemTitle}
                   className="inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-background/50 rounded hover:bg-accent transition-colors"
                 >
-                  <span className="text-muted-foreground">[{i + 1}]</span>
-                  <span className="truncate max-w-[200px]">{citation.itemTitle}</span>
-                </a>
+                  <span className="text-muted-foreground">[{citation.marker ?? i + 1}]</span>
+                  <span className="truncate max-w-[200px]">{decodeEntities(citation.itemTitle)}</span>
+                </Link>
               ))}
-              {message.citations.length > 3 && (
-                <span className="text-xs text-muted-foreground">+{message.citations.length - 3} more</span>
-              )}
             </div>
           )}
 

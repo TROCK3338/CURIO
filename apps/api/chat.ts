@@ -7,7 +7,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from './lib/auth.js';
 import { initializeSchema, semanticSearch } from './lib/db.js';
-import { generateEmbedding, chatWithSaves } from './lib/gemini.js';
+import { generateEmbedding, chatWithSaves } from './lib/ai.js';
 import type { ChatResponse, SavedItem } from './lib/types';
 
 const ChatSchema = z.object({

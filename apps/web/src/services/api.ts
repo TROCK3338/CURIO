@@ -1,9 +1,9 @@
 /**
- * API Client for MindSpace PWA
+ * API client for the CURIO PWA
  * Handles communication with Vercel serverless functions
  */
 
-import type { SavedItem, SearchResponse, ChatResponse, ClusterResponse, IngestRequest, IngestResponse } from '@mindspace/shared';
+import type { SavedItem, SearchResponse, ChatResponse, ClusterResponse, IngestRequest, IngestResponse } from '@curio/shared';
 
 const API_BASE = '/api';
 
@@ -129,11 +129,36 @@ export async function regenerateClusters(): Promise<ClusterResponse> {
 
 export async function getItem(id: string): Promise<SavedItem | null> {
   try {
-    return await fetchJson<SavedItem>(`/items/${id}`);
+    return await fetchJson<SavedItem>(`/items/${encodeURIComponent(id)}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
+}
+
+export interface ItemEdits {
+  title?: string | null;
+  userNote?: string | null;
+  tags?: string[];
+}
+
+export async function updateItem(id: string, edits: ItemEdits): Promise<SavedItem> {
+  return fetchJson<SavedItem>(`/items/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(edits),
+  });
+}
+
+export async function deleteItem(id: string): Promise<void> {
+  await fetchJson<{ success: boolean }>(`/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Re-run AI summary, tags, entities and embedding for a save. */
+export async function reprocessItem(id: string): Promise<SavedItem> {
+  return fetchJson<SavedItem>(`/items/${encodeURIComponent(id)}`, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'reprocess' }),
+  });
 }
 
 /* ============================================

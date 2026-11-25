@@ -6,7 +6,7 @@
 import { getPendingQueue, syncQueue, clearSyncedQueue } from './indexeddb';
 import { ingestItem } from './api';
 import { registerBackgroundSync } from '../utils/sw';
-import type { UserSettings } from '@mindspace/shared';
+import type { UserSettings } from '@curio/shared';
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
@@ -105,6 +105,7 @@ async function performSync(): Promise<void> {
   if (isSyncing || !navigator.onLine) return;
 
   isSyncing = true;
+  window.dispatchEvent(new CustomEvent('sync-state'));
   console.log('[Sync] Starting sync...');
 
   try {
@@ -127,6 +128,8 @@ async function performSync(): Promise<void> {
     window.dispatchEvent(new CustomEvent('sync-error', { detail: error }));
   } finally {
     isSyncing = false;
+    // Lets the UI drop its "Syncing" indicator even when nothing was uploaded
+    window.dispatchEvent(new CustomEvent('sync-state'));
   }
 }
 

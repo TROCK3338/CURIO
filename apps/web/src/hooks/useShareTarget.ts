@@ -9,7 +9,7 @@ import { addToQueue, getPendingQueue, parseShareTargetData } from '../services/i
 import { ingestItem } from '../services/api';
 import { initializeSync, triggerManualSync, getSyncStatus } from '../services/sync';
 import { getSettings } from '../services/indexeddb';
-import type { ShareTargetData, IngestRequest } from '@mindspace/shared';
+import type { ShareTargetData, IngestRequest } from '@curio/shared';
 
 export interface ShareTargetState {
   isProcessing: boolean;

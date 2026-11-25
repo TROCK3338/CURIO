@@ -6,15 +6,34 @@
 
 import type { Platform, ExtractedEntities } from './types';
 
-export function decodeHtmlEntities(text: string): string {
+const NAMED_ENTITIES: Record<string, string> = {
+  quot: '"', amp: '&', lt: '<', gt: '>', apos: "'", nbsp: ' ',
+  hellip: '…', mdash: '—', ndash: '–', rsquo: '\u2019', lsquo: '\u2018', rdquo: '\u201d', ldquo: '\u201c',
+};
+
+function fromCodePoint(code: number): string {
+  try {
+    return String.fromCodePoint(code);
+  } catch {
+    return '';
+  }
+}
+
+function decodeEntitiesOnce(text: string): string {
   return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/gi, "'")
-    .replace(/&nbsp;/g, ' ');
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, num: string) => fromCodePoint(parseInt(num, 10)))
+    .replace(/&([a-z]+);/gi, (match, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? match);
+}
+
+/**
+ * Decodes named and numeric HTML entities ("&quot;", "&#064;", "&#x1f924;").
+ * Scraped meta tags are often double-encoded ("&amp;quot;"), so a second pass runs when needed.
+ */
+export function decodeHtmlEntities(text: string): string {
+  let out = decodeEntitiesOnce(text);
+  if (/&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i.test(out)) out = decodeEntitiesOnce(out);
+  return out;
 }
 
 // ============================================
@@ -23,7 +42,18 @@ export function decodeHtmlEntities(text: string): string {
 
 export function extractShortcode(url: string, platform: Platform): string | null {
   try {
-    const pathname = new URL(url).pathname;
+    const parsed = new URL(url);
+    const pathname = parsed.pathname;
+
+    // YouTube IDs live in the query string (?v=) or the youtu.be path, not just /shorts/
+    if (platform === 'youtube') {
+      const v = parsed.searchParams.get('v');
+      if (v && /^[\w-]{6,}$/.test(v)) return v;
+      if (isDomain(parsed.hostname.toLowerCase(), 'youtu.be')) {
+        const id = pathname.split('/')[1];
+        if (id && /^[\w-]{6,}$/.test(id)) return id;
+      }
+    }
 
     const patterns: Record<Platform, RegExp[]> = {
       instagram: [
@@ -39,9 +69,8 @@ export function extractShortcode(url: string, platform: Platform): string | null
         /\/status\/(\d+)/,
       ],
       youtube: [
-        /\/watch\?v=([^&]+)/,
         /\/shorts\/([^/?#]+)/,
-        /youtu\.be\/([^/?#]+)/,
+        /\/live\/([^/?#]+)/,
       ],
       reddit: [
         /\/comments\/([^/?#]+)/,
@@ -360,18 +389,29 @@ function extractPrice(text: string): string | undefined {
   return match ? match[0] : undefined;
 }
 
+const PLATFORM_DOMAINS: Array<[Platform, string[]]> = [
+  ['instagram', ['instagram.com', 'instagr.am']],
+  ['tiktok', ['tiktok.com']],
+  ['x', ['x.com', 'twitter.com']],
+  ['youtube', ['youtube.com', 'youtu.be']],
+  ['reddit', ['reddit.com', 'redd.it']],
+  ['pinterest', ['pinterest.com', 'pin.it']],
+  ['linkedin', ['linkedin.com']],
+  ['threads', ['threads.net', 'threads.com']],
+  ['bluesky', ['bsky.app']],
+];
+
+/** True when `hostname` is `domain` or a subdomain of it (so "netflix.com" is not "x.com"). */
+function isDomain(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
 export function detectPlatform(url: string): Platform {
   try {
-    const hostname = new URL(url).hostname.replace('www.', '');
-    if (hostname.includes('instagram.com')) return 'instagram';
-    if (hostname.includes('tiktok.com')) return 'tiktok';
-    if (hostname.includes('x.com') || hostname.includes('twitter.com')) return 'x';
-    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) return 'youtube';
-    if (hostname.includes('reddit.com')) return 'reddit';
-    if (hostname.includes('pinterest.com')) return 'pinterest';
-    if (hostname.includes('linkedin.com')) return 'linkedin';
-    if (hostname.includes('threads.net')) return 'threads';
-    if (hostname.includes('bsky.app')) return 'bluesky';
+    const hostname = new URL(url).hostname.toLowerCase();
+    for (const [platform, domains] of PLATFORM_DOMAINS) {
+      if (domains.some(domain => isDomain(hostname, domain))) return platform;
+    }
     return 'generic';
   } catch {
     return 'generic';

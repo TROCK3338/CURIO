@@ -1,17 +1,37 @@
 /**
- * GET /api/items/:id
- * Fetch one saved item by its stable identifier.
+ * /api/items/:id
+ *   GET    - fetch one saved item
+ *   PATCH  - edit title, note and/or tags  { title?, userNote?, tags? }
+ *   DELETE - delete the save
+ *   POST   - re-run AI enrichment          { action: "reprocess" }
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from '../lib/auth.js';
-import { getItem, initializeSchema } from '../lib/db.js';
+import { deleteItem, getItem, initializeSchema, updateItemFields, upsertItem } from '../lib/db.js';
+import { buildEmbeddingText, enrichItem } from '../lib/enrich.js';
+import { generateEmbedding } from '../lib/ai.js';
+import type { SavedItem } from '../lib/types';
+
+const PatchSchema = z.object({
+  title: z.string().trim().max(500).nullable().optional(),
+  userNote: z.string().trim().max(10_000).nullable().optional(),
+  tags: z.array(z.string().trim().toLowerCase().min(1).max(40)).max(30).optional(),
+}).strict();
+
+const PostSchema = z.object({ action: z.literal('reprocess') });
+
+function toResponse(item: SavedItem & { enrichmentAttempts?: number }) {
+  const { embedding: _embedding, enrichmentAttempts: _attempts, ...rest } = item;
+  return rest;
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  setCorsHeaders(req, res, 'GET, OPTIONS');
+  setCorsHeaders(req, res, 'GET, PATCH, DELETE, POST, OPTIONS');
 
   if (req.method === 'OPTIONS') return res.status(200).send('');
-  if (req.method !== 'GET') {
+  if (!['GET', 'PATCH', 'DELETE', 'POST'].includes(req.method ?? '')) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
@@ -20,13 +40,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     await initializeSchema();
+
     const id = Array.isArray(req.query.id) ? req.query.id[0] : req.query.id;
     if (!id) return res.status(400).json({ error: 'Missing item id' });
 
+    if (req.method === 'DELETE') {
+      const deleted = await deleteItem(id, userId);
+      if (!deleted) return res.status(404).json({ error: 'Item not found' });
+      return res.status(200).json({ success: true, id });
+    }
+
     const item = await getItem(id, userId);
     if (!item) return res.status(404).json({ error: 'Item not found' });
-    const { embedding: _embedding, ...responseItem } = item;
-    return res.status(200).json(responseItem);
+
+    if (req.method === 'GET') {
+      return res.status(200).json(toResponse(item));
+    }
+
+    if (req.method === 'PATCH') {
+      const parsed = PatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() });
+      }
+
+      const fields = {
+        ...parsed.data,
+        title: parsed.data.title === '' ? null : parsed.data.title,
+        userNote: parsed.data.userNote === '' ? null : parsed.data.userNote,
+        tags: parsed.data.tags ? [...new Set(parsed.data.tags)] : undefined,
+      };
+      const updated: SavedItem = {
+        ...item,
+        ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)),
+      };
+
+      // Keep semantic search in sync with the edit (best effort: the old vector stays if AI is down)
+      let embedding: number[] | null = null;
+      try {
+        embedding = Array.from(await generateEmbedding(buildEmbeddingText(updated)));
+      } catch (error) {
+        console.warn('[Items] Re-embedding after edit failed; keeping previous embedding:', error);
+      }
+
+      await updateItemFields(id, userId, fields, embedding);
+      const fresh = await getItem(id, userId);
+      return res.status(200).json(toResponse(fresh ?? updated));
+    }
+
+    // POST: reprocess
+    const parsed = PostSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Unknown action', available: ['reprocess'] });
+    }
+
+    const reprocessed = await enrichItem({
+      id: item.id,
+      userId,
+      url: item.url,
+      platform: item.platform,
+      sharedTitle: item.title,
+      sharedText: '',
+      userNote: item.userNote,
+      savedAt: item.savedAt,
+      // A manual retry gets a fresh set of automatic retries if it fails again
+      previousAttempts: 0,
+    });
+    await upsertItem(reprocessed);
+    return res.status(200).json(toResponse(reprocessed));
   } catch (error) {
     console.error('[Items] Error:', error);
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Internal server error' });

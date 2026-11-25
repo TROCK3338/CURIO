@@ -4,7 +4,7 @@
  */
 
 import Dexie, { type Table } from 'dexie';
-import type { SavedItem, OfflineQueueItem, UserSettings, ShareTargetData } from '@mindspace/shared';
+import type { SavedItem, OfflineQueueItem, UserSettings, ShareTargetData } from '@curio/shared';
 
 class CurioDB extends Dexie {
   items!: Table<SavedItem, string>;
@@ -123,7 +123,7 @@ export async function clearSyncedQueue(): Promise<void> {
 export const DEFAULT_SETTINGS: UserSettings = {
   autoTag: true,
   autoSummarize: true,
-  preferredModel: 'gemini-1.5-flash',
+  preferredModel: '@cf/meta/llama-3.1-8b-instruct-fp8-fast',
   syncEnabled: true,
   syncIntervalMinutes: 15,
   wifiOnlySync: true,

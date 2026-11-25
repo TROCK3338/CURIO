@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, Copy, Tag, Calendar, Globe, User, Loader2, Sparkles, Brain } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { ArrowLeft, ExternalLink, Copy, Tag, Calendar, Globe, User, Loader2, Sparkles, Brain, Pencil, Trash2, RefreshCw, AlertCircle, Clock } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { getItemLocally } from '../services/indexeddb';
 import { getItem, searchItems } from '../services/api';
 import { Button } from '../components/ui/Button';
@@ -11,12 +11,21 @@ import { Avatar } from '../components/ui/Avatar';
 import { Skeleton } from '../components/ui/Skeleton';
 import { formatDistanceToNow, format } from 'date-fns';
 import { cn } from '../utils/cn';
-import { useSuccessToast } from '../components/ui/Toast';
+import { decodeEntities, displayAuthor, displayTitle } from '../utils/text';
+import { useSuccessToast, useErrorToast } from '../components/ui/Toast';
+import { Input } from '../components/ui/Input';
+import { useDeleteItem, useReprocessItem, useUpdateItem } from '../hooks/useItems';
 
 export function ItemPage() {
   const { id } = useParams<{ id: string }>();
-  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const successToast = useSuccessToast();
+  const errorToast = useErrorToast();
+  const updateMutation = useUpdateItem();
+  const deleteMutation = useDeleteItem();
+  const reprocessMutation = useReprocessItem();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState({ title: '', userNote: '', tags: '' });
   const [item, setItem] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -85,6 +94,52 @@ export function ItemPage() {
 
   const handleOpen = () => window.open(item.url, '_blank', 'noopener,noreferrer');
 
+  const startEditing = () => {
+    setDraft({
+      title: decodeEntities(item.title),
+      userNote: decodeEntities(item.userNote),
+      tags: (item.tags ?? []).join(', '),
+    });
+    setIsEditing(true);
+  };
+
+  const handleSave = () => {
+    const tags = [...new Set(draft.tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean))];
+    updateMutation.mutate(
+      { id: item.id, edits: { title: draft.title.trim() || null, userNote: draft.userNote.trim() || null, tags } },
+      {
+        onSuccess: (updated) => {
+          setItem(updated);
+          setIsEditing(false);
+          successToast('Changes saved');
+        },
+        onError: (e) => errorToast(e instanceof Error ? e.message : 'Could not save changes'),
+      },
+    );
+  };
+
+  const handleDelete = () => {
+    if (!confirm('Delete this save? This cannot be undone.')) return;
+    deleteMutation.mutate(item.id, {
+      onSuccess: () => {
+        successToast('Save deleted');
+        navigate('/', { replace: true });
+      },
+      onError: (e) => errorToast(e instanceof Error ? e.message : 'Could not delete'),
+    });
+  };
+
+  const handleReprocess = () => {
+    reprocessMutation.mutate(item.id, {
+      onSuccess: (updated) => {
+        setItem(updated);
+        if (updated.enrichmentStatus === 'enriched') successToast('AI details refreshed');
+        else errorToast('AI is still unavailable; CURIO will keep retrying automatically');
+      },
+      onError: (e) => errorToast(e instanceof Error ? e.message : 'Could not re-run AI'),
+    });
+  };
+
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Back Button */}
@@ -123,7 +178,37 @@ export function ItemPage() {
         <CardContent className="p-6 space-y-6">
           {/* Title & Meta */}
           <div>
-            <h1 className="text-2xl font-bold">{item.title || `${item.platform ? item.platform.charAt(0).toUpperCase() + item.platform.slice(1) : 'Saved'} link`}</h1>
+            {isEditing ? (
+              <div className="space-y-3">
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-muted-foreground">Title</span>
+                  <Input value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} placeholder="Title" />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-muted-foreground">Your note</span>
+                  <textarea
+                    value={draft.userNote}
+                    onChange={e => setDraft(d => ({ ...d, userNote: e.target.value }))}
+                    rows={4}
+                    placeholder="Why did you save this?"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-muted-foreground">Tags (comma separated)</span>
+                  <Input value={draft.tags} onChange={e => setDraft(d => ({ ...d, tags: e.target.value }))} placeholder="recipe, dinner, italian" />
+                </label>
+                <div className="flex gap-2">
+                  <Button onClick={handleSave} disabled={updateMutation.isPending}>
+                    {updateMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                    Save
+                  </Button>
+                  <Button variant="ghost" onClick={() => setIsEditing(false)} disabled={updateMutation.isPending}>Cancel</Button>
+                </div>
+              </div>
+            ) : (
+            <h1 className="text-2xl font-bold">{displayTitle(item)}</h1>
+            )}
             <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Calendar className="h-4 w-4" />
@@ -137,9 +222,36 @@ export function ItemPage() {
               )}
               <span className="flex items-center gap-1">
                 <User className="h-4 w-4" />
-                {item.authorDisplayName || item.authorUsername || 'Unknown'}
+                {displayAuthor(item) || 'Unknown'}
               </span>
             </div>
+
+            {!isEditing && (
+              <div className="flex flex-wrap gap-2 mt-4">
+                <Button variant="outline" size="sm" onClick={startEditing}>
+                  <Pencil className="h-4 w-4 mr-1" />
+                  Edit
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleReprocess} disabled={reprocessMutation.isPending}>
+                  <RefreshCw className={cn('h-4 w-4 mr-1', reprocessMutation.isPending && 'animate-spin')} />
+                  {reprocessMutation.isPending ? 'Re-running AI…' : 'Re-run AI'}
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleCopy}>
+                  <Copy className="h-4 w-4 mr-1" />
+                  Copy link
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDelete}
+                  disabled={deleteMutation.isPending}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Delete
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Tags */}
@@ -150,7 +262,14 @@ export function ItemPage() {
                 <Badge key={tag} variant="secondary">{tag}</Badge>
               ))}
               {item.enrichmentStatus === 'pending' && (
-                <Badge variant="outline"><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Processing</Badge>
+                <Badge variant="outline" title={item.enrichmentError ?? undefined}>
+                  <Clock className="h-3 w-3 mr-1" /> Waiting for AI · retries automatically
+                </Badge>
+              )}
+              {item.enrichmentStatus === 'failed' && (
+                <Badge variant="outline" className="text-destructive border-destructive/40" title={item.enrichmentError ?? undefined}>
+                  <AlertCircle className="h-3 w-3 mr-1" /> AI processing failed · tap Re-run AI
+                </Badge>
               )}
             </div>
           </div>
@@ -180,7 +299,7 @@ export function ItemPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="whitespace-pre-wrap">{item.userNote}</p>
+                <p className="whitespace-pre-wrap">{decodeEntities(item.userNote)}</p>
               </CardContent>
             </Card>
           )}
@@ -287,7 +406,7 @@ function RelatedItems({ itemId, tags }: { itemId: string; tags: string[] }) {
                   <img src={item.thumbnailUrl} alt="" className="h-16 w-16 rounded object-cover group-hover:scale-105 transition-transform" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium line-clamp-1 group-hover:text-primary">{item.title || 'Untitled'}</p>
+                  <p className="font-medium line-clamp-1 group-hover:text-primary">{displayTitle(item)}</p>
                   <p className="text-xs text-muted-foreground">{item.platform}</p>
                 </div>
               </div>

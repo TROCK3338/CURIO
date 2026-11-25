@@ -185,6 +185,8 @@ export interface ChatCitation {
   itemUrl: string;
   relevanceScore: number;
   excerpt: string;
+  /** The [n] number used for this item in the answer text. */
+  marker?: number;
 }
 
 export interface ClusterResponse {
@@ -229,7 +231,7 @@ export interface UserSettings {
   // AI behavior
   autoTag: boolean;
   autoSummarize: boolean;
-  preferredModel: 'gemini-1.5-flash' | 'gemini-1.5-pro';
+  preferredModel: string;
   customTagPrompt?: string;
   customSummaryPrompt?: string;
 
@@ -251,7 +253,7 @@ export interface UserSettings {
 export const DEFAULT_SETTINGS: UserSettings = {
   autoTag: true,
   autoSummarize: true,
-  preferredModel: 'gemini-1.5-flash',
+  preferredModel: '@cf/meta/llama-3.1-8b-instruct-fp8-fast',
   syncEnabled: true,
   syncIntervalMinutes: 15,
   wifiOnlySync: true,

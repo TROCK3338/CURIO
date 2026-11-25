@@ -1,9 +1,8 @@
 /**
  * AI Client (Cloudflare Workers AI)
  *
- * NOTE: the file is still called gemini.ts so existing imports keep working,
- * but it now talks to Cloudflare Workers AI's REST API (free daily allowance,
- * no credit card needed). Handles: embeddings, summarization, tagging,
+ * Talks to Cloudflare Workers AI's REST API (free daily allowance, no credit
+ * card needed). Handles: embeddings, summarization, tagging,
  * entity extraction, chat and clustering.
  *
  * Required env vars:
@@ -188,6 +187,8 @@ export interface ChatResult {
     itemUrl: string;
     relevanceScore: number;
     excerpt: string;
+    /** The [n] number used in the answer text. */
+    marker: number;
   }>;
 }
 
@@ -216,24 +217,7 @@ Tags: ${item.tags.join(', ')}
 
   try {
     const answer = (await generateText(prompt, { maxTokens: 1024, temperature: 0.3 })).trim();
-    const lowerAnswer = answer.toLowerCase();
-
-    const citations = usedItems
-      .filter(item => {
-        const rawTitle = item.title?.toLowerCase().trim();
-        const titleMatch = rawTitle && rawTitle.length >= 10 ? rawTitle.slice(0, Math.min(rawTitle.length, 40)) : null;
-        const matchesTitle = titleMatch ? lowerAnswer.includes(titleMatch) : false;
-        const matchesUrl = item.url ? lowerAnswer.includes(item.url.toLowerCase()) : false;
-        return matchesTitle || matchesUrl;
-      })
-      .map((item, i) => ({
-        itemId: item.id,
-        itemTitle: item.title || 'Untitled',
-        itemUrl: item.url,
-        relevanceScore: 1 - i * 0.1,
-        excerpt: item.summary || item.userNote || '',
-      }));
-
+    const citations = citationsFromAnswer(answer, usedItems);
     return { answer, citations };
   } catch (error) {
     console.error('[AI] Chat failed:', error);
@@ -242,6 +226,36 @@ Tags: ${item.tags.join(', ')}
       citations: [],
     };
   }
+}
+
+/**
+ * Maps the [n] markers the model wrote back to the numbered context items,
+ * in the order they were first cited. Out-of-range numbers are ignored.
+ */
+export function citationsFromAnswer(answer: string, usedItems: SavedItem[]): ChatResult['citations'] {
+  const seen = new Set<number>();
+  const order: number[] = [];
+  for (const match of answer.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)) {
+    for (const part of match[1].split(',')) {
+      const n = Number(part.trim());
+      if (n >= 1 && n <= usedItems.length && !seen.has(n)) {
+        seen.add(n);
+        order.push(n);
+      }
+    }
+  }
+
+  return order.map((n, i) => {
+    const item = usedItems[n - 1];
+    return {
+      itemId: item.id,
+      itemTitle: item.title || 'Untitled',
+      itemUrl: item.url,
+      relevanceScore: Math.max(0.1, 1 - i * 0.1),
+      excerpt: (item.summary || item.userNote || '').slice(0, 300),
+      marker: n,
+    };
+  });
 }
 
 export interface Cluster {

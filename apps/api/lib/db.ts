@@ -190,6 +190,10 @@ export function initializeSchema(): Promise<void> {
       await ensureUserIdColumn('clusters');
       await ensureUserIdColumn('settings');
       await ensureItemsTableWithoutGlobalUrlUnique();
+      const itemColumns = await client.execute(`PRAGMA table_info(items)`);
+      if (!itemColumns.rows.some(r => String(r.name) === 'enrichment_attempts')) {
+        await client.execute(`ALTER TABLE items ADD COLUMN enrichment_attempts INTEGER NOT NULL DEFAULT 0`);
+      }
       await client.batch([
         `CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id, saved_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_clusters_user_id ON clusters(user_id, generated_at DESC)`,
@@ -211,8 +215,16 @@ function embeddingToBlob(embedding: number[] | null): Buffer | null {
   return embedding ? Buffer.from(new Float32Array(embedding).buffer) : null;
 }
 
-export async function insertItem(item: SavedItem): Promise<void> {
+/** Every column except the embedding BLOB (~3 KB per row) for list/search queries. */
+const ITEM_COLUMNS = `id, user_id, url, platform, title, user_note, summary, tags, entities,
+  media_url, thumbnail_url, author_username, author_display_name, published_at,
+  saved_at, updated_at, enrichment_status, enrichment_error`;
+
+export type StoredItem = SavedItem & { enrichmentAttempts?: number };
+
+export async function upsertItem(item: StoredItem): Promise<void> {
   const db = getDb();
+  const now = new Date().toISOString();
   const userId = item.userId || 'legacy';
 
   await db.execute({
@@ -221,8 +233,25 @@ export async function insertItem(item: SavedItem): Promise<void> {
         id, user_id, url, platform, title, user_note, summary, tags, entities,
         embedding, media_url, thumbnail_url, author_username,
         author_display_name, published_at, saved_at, updated_at,
-        enrichment_status, enrichment_error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        enrichment_status, enrichment_error, enrichment_attempts
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        user_note = excluded.user_note,
+        summary = excluded.summary,
+        tags = excluded.tags,
+        entities = excluded.entities,
+        embedding = excluded.embedding,
+        media_url = excluded.media_url,
+        thumbnail_url = excluded.thumbnail_url,
+        author_username = excluded.author_username,
+        author_display_name = excluded.author_display_name,
+        published_at = excluded.published_at,
+        updated_at = excluded.updated_at,
+        enrichment_status = excluded.enrichment_status,
+        enrichment_error = excluded.enrichment_error,
+        enrichment_attempts = excluded.enrichment_attempts
+      WHERE items.user_id = excluded.user_id
     `,
     args: [
       item.id,
@@ -241,121 +270,89 @@ export async function insertItem(item: SavedItem): Promise<void> {
       item.authorDisplayName,
       item.publishedAt,
       item.savedAt,
-      item.updatedAt,
+      now,
       item.enrichmentStatus,
       item.enrichmentError,
+      item.enrichmentAttempts ?? 0,
     ],
   });
 }
 
-export async function upsertItem(item: SavedItem): Promise<void> {
+export async function getItem(id: string, userId: string): Promise<StoredItem | null> {
   const db = getDb();
-  const now = new Date().toISOString();
-  const userId = item.userId || 'legacy';
-
-  try {
-    await db.execute({
-      sql: `
-        INSERT INTO items (
-          id, user_id, url, platform, title, user_note, summary, tags, entities,
-          embedding, media_url, thumbnail_url, author_username,
-          author_display_name, published_at, saved_at, updated_at,
-          enrichment_status, enrichment_error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          title = excluded.title,
-          user_note = excluded.user_note,
-          summary = excluded.summary,
-          tags = excluded.tags,
-          entities = excluded.entities,
-          embedding = excluded.embedding,
-          media_url = excluded.media_url,
-          thumbnail_url = excluded.thumbnail_url,
-          author_username = excluded.author_username,
-          author_display_name = excluded.author_display_name,
-          published_at = excluded.published_at,
-          updated_at = excluded.updated_at,
-          enrichment_status = excluded.enrichment_status,
-          enrichment_error = excluded.enrichment_error
-      `,
-      args: [
-        item.id,
-        userId,
-        item.url,
-        item.platform,
-        item.title,
-        item.userNote,
-        item.summary,
-        JSON.stringify(item.tags),
-        JSON.stringify(item.entities),
-        embeddingToBlob(item.embedding),
-        item.mediaUrl,
-        item.thumbnailUrl,
-        item.authorUsername,
-        item.authorDisplayName,
-        item.publishedAt,
-        item.savedAt,
-        now,
-        item.enrichmentStatus,
-        item.enrichmentError,
-      ],
-    });
-  } catch (error: any) {
-    if (String(error?.message || '').includes('UNIQUE constraint failed: items.url')) {
-      console.warn('[DB] Handled items.url constraint conflict; updating existing item by url');
-      await db.execute({
-        sql: `
-          UPDATE items SET
-            user_id = ?,
-            title = ?,
-            user_note = ?,
-            summary = ?,
-            tags = ?,
-            entities = ?,
-            embedding = ?,
-            media_url = ?,
-            thumbnail_url = ?,
-            author_username = ?,
-            author_display_name = ?,
-            published_at = ?,
-            updated_at = ?,
-            enrichment_status = ?,
-            enrichment_error = ?
-          WHERE url = ?
-        `,
-        args: [
-          userId,
-          item.title,
-          item.userNote,
-          item.summary,
-          JSON.stringify(item.tags),
-          JSON.stringify(item.entities),
-          embeddingToBlob(item.embedding),
-          item.mediaUrl,
-          item.thumbnailUrl,
-          item.authorUsername,
-          item.authorDisplayName,
-          item.publishedAt,
-          now,
-          item.enrichmentStatus,
-          item.enrichmentError,
-          item.url,
-        ],
-      });
-      return;
-    }
-    throw error;
-  }
+  const result = await db.execute({
+    sql: `SELECT *, COALESCE(enrichment_attempts, 0) AS attempts FROM items WHERE id = ? AND user_id = ?`,
+    args: [id, userId],
+  });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as Record<string, unknown>;
+  return { ...rowToItem(row), enrichmentAttempts: Number(row.attempts ?? 0) };
 }
 
-export async function getItem(id: string, userId?: string): Promise<SavedItem | null> {
+export async function deleteItem(id: string, userId: string): Promise<boolean> {
   const db = getDb();
-  const result = userId
-    ? await db.execute({ sql: `SELECT * FROM items WHERE id = ? AND user_id = ?`, args: [id, userId] })
-    : await db.execute({ sql: `SELECT * FROM items WHERE id = ?`, args: [id] });
+  const result = await db.execute({
+    sql: `DELETE FROM items WHERE id = ? AND user_id = ?`,
+    args: [id, userId],
+  });
+  return (result.rowsAffected ?? 0) > 0;
+}
 
-  if (result.rows.length === 0) return null;
-  return rowToItem(result.rows[0]);
+export interface UserEditableFields {
+  title?: string | null;
+  userNote?: string | null;
+  tags?: string[];
+}
+
+/** Applies user edits; pass a fresh embedding to keep semantic search in sync. */
+export async function updateItemFields(
+  id: string,
+  userId: string,
+  fields: UserEditableFields,
+  embedding?: number[] | null,
+): Promise<void> {
+  const sets: string[] = [];
+  const args: (string | null | Buffer)[] = [];
+
+  if (fields.title !== undefined) { sets.push('title = ?'); args.push(fields.title); }
+  if (fields.userNote !== undefined) { sets.push('user_note = ?'); args.push(fields.userNote); }
+  if (fields.tags !== undefined) { sets.push('tags = ?'); args.push(JSON.stringify(fields.tags)); }
+  if (embedding) { sets.push('embedding = ?'); args.push(embeddingToBlob(embedding)); }
+  if (sets.length === 0) return;
+
+  sets.push('updated_at = ?');
+  args.push(new Date().toISOString());
+
+  await getDb().execute({
+    sql: `UPDATE items SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`,
+    args: [...args, id, userId],
+  });
+}
+
+/** Items still waiting for AI enrichment, oldest first, skipping ones touched in the last few minutes. */
+export async function getItemsToRetry(limit = 10): Promise<StoredItem[]> {
+  const staleBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const result = await getDb().execute({
+    sql: `SELECT ${ITEM_COLUMNS}, COALESCE(enrichment_attempts, 0) AS attempts
+          FROM items
+          WHERE enrichment_status = 'pending' AND updated_at < ?
+          ORDER BY updated_at ASC
+          LIMIT ?`,
+    args: [staleBefore, limit],
+  });
+  return result.rows.map(row => ({
+    ...rowToItem(row as Record<string, unknown>),
+    enrichmentAttempts: Number((row as Record<string, unknown>).attempts ?? 0),
+  }));
+}
+
+function parseJson<T>(value: unknown, fallback: T): T {
+  if (value == null || value === '') return fallback;
+  try {
+    return JSON.parse(String(value)) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 export function rowToItem(row: Record<string, unknown>): SavedItem {
@@ -367,8 +364,8 @@ export function rowToItem(row: Record<string, unknown>): SavedItem {
     title: row.title as string | null,
     userNote: row.user_note as string | null,
     summary: row.summary as string | null,
-    tags: row.tags ? JSON.parse(String(row.tags)) : [],
-    entities: row.entities ? JSON.parse(String(row.entities)) : {},
+    tags: parseJson<string[]>(row.tags, []),
+    entities: parseJson(row.entities, {}),
     embedding: row.embedding ? Array.from(new Float32Array(row.embedding as ArrayBuffer)) : null,
     mediaUrl: row.media_url as string | null,
     thumbnailUrl: row.thumbnail_url as string | null,
@@ -380,16 +377,6 @@ export function rowToItem(row: Record<string, unknown>): SavedItem {
     enrichmentStatus: row.enrichment_status as SavedItem['enrichmentStatus'],
     enrichmentError: row.enrichment_error as string | null,
   };
-}
-
-export async function getItemByUrl(url: string, userId?: string): Promise<SavedItem | null> {
-  const db = getDb();
-  const result = userId
-    ? await db.execute({ sql: `SELECT * FROM items WHERE url = ? AND user_id = ?`, args: [url, userId] })
-    : await db.execute({ sql: `SELECT * FROM items WHERE url = ?`, args: [url] });
-
-  if (result.rows.length === 0) return null;
-  return rowToItem(result.rows[0]);
 }
 
 // ============================================
@@ -420,9 +407,12 @@ function buildFilterConditions(filters: SearchFilters): { conditions: string[]; 
   }
 
   if (filters.tags && filters.tags.length > 0) {
-    const tagConditions = filters.tags.map(() => `JSON_EXTRACT(tags, '$') LIKE ?`).join(' OR ');
+    // Exact tag match inside the JSON array (LIKE '%ai%' would also match "email", "rain", ...)
+    const tagConditions = filters.tags
+      .map(() => `EXISTS (SELECT 1 FROM json_each(items.tags) WHERE json_each.value = ?)`)
+      .join(' OR ');
     conditions.push(`(${tagConditions})`);
-    filters.tags.forEach(tag => args.push(`%${tag}%`));
+    filters.tags.forEach(tag => args.push(tag.toLowerCase()));
   }
 
   if (filters.dateFrom) {
@@ -462,37 +452,39 @@ export async function searchItems(
       author_username LIKE ? OR
       author_display_name LIKE ?
     )`);
-    const likeQuery = `%${query}%`;
+    const likeQuery = `%${query.trim()}%`;
     args.unshift(likeQuery, likeQuery, likeQuery, likeQuery, likeQuery, likeQuery);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  const countResult = await db.execute({
-    sql: `SELECT COUNT(*) as total FROM items ${whereClause}`,
-    args,
-  });
-  const total = Number(countResult.rows[0]?.total ?? 0);
+  const [countResult, itemsResult] = await Promise.all([
+    db.execute({ sql: `SELECT COUNT(*) as total FROM items ${whereClause}`, args }),
+    db.execute({
+      sql: `SELECT ${ITEM_COLUMNS} FROM items ${whereClause} ORDER BY saved_at DESC LIMIT ? OFFSET ?`,
+      args: [...args, limit, offset],
+    }),
+  ]);
 
-  const itemsResult = await db.execute({
-    sql: `
-      SELECT * FROM items
-      ${whereClause}
-      ORDER BY saved_at DESC
-      LIMIT ? OFFSET ?
-    `,
-    args: [...args, limit, offset],
-  });
-
-  const items = itemsResult.rows.map(rowToItem);
-  return { items, total };
+  return {
+    items: itemsResult.rows.map(row => rowToItem(row as Record<string, unknown>)),
+    total: Number(countResult.rows[0]?.total ?? 0),
+  };
 }
+
+/**
+ * Cosine distance above which a save is considered unrelated to the query.
+ * bge-base embeddings put clearly unrelated text above ~0.5 distance and
+ * related text well below that. Override with SEMANTIC_MAX_DISTANCE.
+ */
+const SEMANTIC_MAX_DISTANCE = Number(process.env.SEMANTIC_MAX_DISTANCE) || 0.5;
 
 /**
  * Meaning-based search: ranks saved items by cosine distance between the
  * query embedding and each item's stored embedding (brute force, which is
- * perfectly fast for a personal library). Falls back to keyword search if
- * vector search is unavailable or finds nothing.
+ * perfectly fast for a personal library). Only items within
+ * SEMANTIC_MAX_DISTANCE are returned. Falls back to keyword search if vector
+ * search is unavailable or finds nothing.
  */
 export async function semanticSearch(
   queryEmbedding: Float32Array,
@@ -509,35 +501,45 @@ export async function semanticSearch(
 
   // vector32() takes a JSON array of numbers and builds the vector for us.
   const queryVector = `[${Array.from(queryEmbedding).join(',')}]`;
+  const ranked = `
+    SELECT ${ITEM_COLUMNS}, vector_distance_cos(embedding, vector32(?)) AS distance
+    FROM items
+    ${whereClause}
+  `;
 
   try {
-    const result = await db.execute({
-      sql: `
-        SELECT *, vector_distance_cos(embedding, vector32(?)) AS distance
-        FROM items
-        ${whereClause}
-        ORDER BY distance ASC
-        LIMIT ? OFFSET ?
-      `,
-      args: [queryVector, ...args, limit, offset],
-    });
+    const [result, countResult] = await Promise.all([
+      db.execute({
+        sql: `SELECT * FROM (${ranked}) WHERE distance <= ? ORDER BY distance ASC LIMIT ? OFFSET ?`,
+        args: [queryVector, ...args, SEMANTIC_MAX_DISTANCE, limit, offset],
+      }),
+      db.execute({
+        sql: `SELECT COUNT(*) AS total FROM (${ranked}) WHERE distance <= ?`,
+        args: [queryVector, ...args, SEMANTIC_MAX_DISTANCE],
+      }),
+    ]);
 
-    const items = result.rows.map(rowToItem);
-    if (items.length === 0 && fallbackQuery.trim()) {
+    const items = result.rows.map(row => rowToItem(row as Record<string, unknown>));
+    if (items.length === 0 && offset === 0 && fallbackQuery.trim()) {
       return searchItems(fallbackQuery, filters, limit, offset);
     }
 
-    const countResult = await db.execute({
-      sql: `SELECT COUNT(*) as total FROM items ${whereClause}`,
-      args,
-    });
-    const total = Number(countResult.rows[0]?.total ?? 0);
-
-    return { items, total };
+    return { items, total: Number(countResult.rows[0]?.total ?? 0) };
   } catch (e) {
     console.warn('[DB] Vector search failed, falling back to keyword:', e);
     return searchItems(fallbackQuery, filters, limit, offset);
   }
+}
+
+/** Recently saved, fully enriched items for clustering (no embeddings needed). */
+export async function getItemsForClustering(userId: string, limit = 1000): Promise<SavedItem[]> {
+  const result = await getDb().execute({
+    sql: `SELECT ${ITEM_COLUMNS} FROM items
+          WHERE user_id = ? AND enrichment_status = 'enriched'
+          ORDER BY saved_at DESC LIMIT ?`,
+    args: [userId, limit],
+  });
+  return result.rows.map(row => rowToItem(row as Record<string, unknown>));
 }
 
 // ============================================
@@ -555,64 +557,34 @@ export interface ClusterRow {
   generated_at: string;
 }
 
-export async function saveClusters(clusters: ClusterRow[], userId = 'legacy'): Promise<void> {
+/** Replaces the user's clusters with a freshly generated set. */
+export async function saveClusters(clusters: ClusterRow[], userId: string): Promise<void> {
   const db = getDb();
-  const batch = clusters.map(c => ({
-    sql: `
-      INSERT INTO clusters (id, user_id, label, description, item_count, tags, representative_items, generated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        user_id = excluded.user_id,
-        label = excluded.label,
-        description = excluded.description,
-        item_count = excluded.item_count,
-        tags = excluded.tags,
-        representative_items = excluded.representative_items,
-        generated_at = excluded.generated_at
-    `,
-    args: [
-      `${userId}:${c.id}`,
-      userId,
-      c.label,
-      c.description,
-      c.item_count,
-      c.tags,
-      c.representative_items,
-      c.generated_at,
-    ],
-  }));
-  await db.batch(batch);
+  await db.batch([
+    { sql: `DELETE FROM clusters WHERE user_id = ?`, args: [userId] },
+    ...clusters.map(c => ({
+      sql: `
+        INSERT OR REPLACE INTO clusters (id, user_id, label, description, item_count, tags, representative_items, generated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      args: [
+        `${userId}:${c.id}`,
+        userId,
+        c.label,
+        c.description,
+        c.item_count,
+        c.tags,
+        c.representative_items,
+        c.generated_at,
+      ],
+    })),
+  ], 'write');
 }
 
-export async function getLatestClusters(userId?: string): Promise<ClusterRow[]> {
-  const db = getDb();
-  const result = userId
-    ? await db.execute({ sql: `SELECT * FROM clusters WHERE user_id = ? ORDER BY generated_at DESC LIMIT 20`, args: [userId] })
-    : await db.execute({ sql: `SELECT * FROM clusters ORDER BY generated_at DESC LIMIT 20`, args: [] });
+export async function getLatestClusters(userId: string): Promise<ClusterRow[]> {
+  const result = await getDb().execute({
+    sql: `SELECT * FROM clusters WHERE user_id = ? ORDER BY generated_at DESC, item_count DESC LIMIT 20`,
+    args: [userId],
+  });
   return result.rows as unknown as ClusterRow[];
-}
-
-// ============================================
-// Settings
-// ============================================
-
-export async function getSetting(key: string, userId: string = 'legacy'): Promise<string | null> {
-  const db = getDb();
-  const compositeKey = `${userId}:${key}`;
-  const result = await db.execute({
-    sql: `SELECT value FROM settings WHERE (key = ? AND user_id = ?) OR key = ? OR (key = ? AND user_id = 'legacy') LIMIT 1`,
-    args: [key, userId, compositeKey, key],
-  });
-  const val = result.rows[0]?.value;
-  return val != null ? String(val) : null;
-}
-
-export async function setSetting(key: string, value: string, userId: string = 'legacy'): Promise<void> {
-  const db = getDb();
-  const compositeKey = `${userId}:${key}`;
-  await db.execute({
-    sql: `INSERT INTO settings (key, user_id, value) VALUES (?, ?, ?)
-          ON CONFLICT(key) DO UPDATE SET value = excluded.value, user_id = excluded.user_id`,
-    args: [compositeKey, userId, value],
-  });
 }

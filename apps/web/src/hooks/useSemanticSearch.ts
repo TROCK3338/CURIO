@@ -6,7 +6,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useLocalSearch } from './useItems';
-import type { SavedItem } from '@mindspace/shared';
+import type { SavedItem } from '@curio/shared';
 
 // Simple client-side embedding cache
 const embeddingCache = new Map<string, Float32Array>();

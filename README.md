@@ -1,239 +1,110 @@
-# MindSpace — Your Personal AI Mind Space
+# CURIO
 
-A PWA for saving, organizing, and retrieving content from anywhere (Instagram Reels, TikTok, X, Safari, etc.) with AI-powered tagging, search, and chat.
+Your personal journal for links, Reels and ideas. Share anything from Instagram, TikTok, X, YouTube, Safari or any app with a share sheet, and CURIO summarizes it, tags it, pulls out recipes / places / products / events / workouts, and lets you find it again by meaning or by chatting with your saves.
 
-## ✨ Features
+Live: https://curio-omega-tawny.vercel.app
 
-- **Zero-friction capture**: Share from any iOS/Android app → appears in MindSpace instantly
-- **Cross-device**: Works on iPhone, Mac, iPad, Android, web — single PWA
-- **AI-powered**: Gemini 1.5 Flash tags, summarizes, extracts entities (recipes, products, places, workouts, events)
-- **Semantic search**: Find saves by meaning, not just keywords
-- **Chat with your saves**: Ask questions, get answers with citations
-- **AI clusters**: Automatic thematic grouping of your saves
-- **Offline-first**: IndexedDB queue, background sync when online
-- **Local AI (optional)**: Swap Gemini for Ollama if you get a Mac later
-- **Free tier**: Runs entirely on free tiers (Vercel, Turso, Gemini)
+## Features
 
-## 🏗️ Architecture
+- **Capture from anywhere**: Web Share Target on Android and desktop, an iOS Shortcut on iPhone, plus a quick-save bar in the app
+- **AI enrichment**: summary, tags and structured entities for every save
+- **Semantic search**: find saves by meaning, with keyword fallback
+- **Chat with your saves**: answers cite the saves they came from (`[1]`, `[2]`, tap to open)
+- **Clusters**: automatic topic groups, regenerated nightly or on demand
+- **Edit, delete, re-run AI** on any save
+- **Self-healing**: saves that miss the AI step are retried automatically by a daily cron
+- **Offline-first PWA**: IndexedDB queue and cache, background sync
+- **Accounts**: Clerk sign-in; every save is scoped to its owner
+- **Export**: download all your saves as JSON
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  PWA (React + Vite + TypeScript)                           │
-│  - Web Share Target API (native share sheet integration)   │
-│  - IndexedDB (Dexie) for offline queue & cache             │
-│  - Service Worker (Workbox) for offline support            │
-│  - TanStack Query for server state                          │
-└─────────────────────────────────────────────────────────────┘
-                            │
-              ┌─────────────▼─────────────┐
-              │  Vercel Serverless        │
-              │  Functions (Edge)         │
-              │  - /api/ingest            │
-              │  - /api/search            │
-              │  - /api/chat              │
-              │  - /api/clusters          │
-              └─────────────┬─────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        ▼                   ▼                   ▼
-┌───────────────┐  ┌───────────────┐  ┌───────────────┐
-│  Gemini API   │  │   Turso       │  │  Content      │
-│  (Free tier)  │  │  (libSQL)     │  │  Extraction   │
-│  - Embeddings │  │  - Vector     │  │  - oEmbed     │
-│  - Summarize  │  │    search     │  │  - Meta tags  │
-│  - Tag/Chat   │  │  - 9GB free   │  │  - Quick regex│
-└───────────────┘  └───────────────┘  └───────────────┘
+PWA (React 18 + Vite + TanStack Query + Tailwind, Workbox, Dexie)
+        │  Bearer <Clerk session token>
+        ▼
+Vercel functions  (/api/*.ts re-export apps/api/*.ts)
+  ingest · search · chat · clusters · items/:id · export · health · cron
+        │
+        ├── Turso (libSQL) ─ items, clusters; vector search via vector_distance_cos
+        ├── Cloudflare Workers AI ─ Llama 3.1 8B (text), bge-base-en-v1.5 (embeddings)
+        └── oEmbed / meta tags ─ titles, captions, thumbnails
 ```
 
-## 🚀 Quick Start
+## Project structure
 
-### Prerequisites
+```
+api/                  Vercel entry points (one-line re-exports of apps/api)
+apps/api/             Serverless handlers
+  lib/ai.ts           Cloudflare Workers AI client (process, embed, chat, cluster)
+  lib/enrich.ts       Scrape -> AI -> embed pipeline shared by ingest, reprocess and cron
+  lib/db.ts           Turso schema, migrations and queries
+  lib/extractor.ts    Platform detection, URL canonicalization, metadata scraping
+  lib/clustering.ts   Cluster regeneration
+  tests/              Vitest unit tests
+apps/web/             React PWA
+packages/shared/      Shared TypeScript types (@curio/shared)
+vercel.json           Build, rewrites, headers, cron schedule
+```
 
-- Node.js 20+
-- pnpm (recommended) or npm
-- GitHub account (for Vercel deploy)
-- Free accounts: [Gemini](https://aistudio.google.com/apikey), [Turso](https://turso.tech), [Vercel](https://vercel.com)
+## API
 
-### 1. Clone & Install
+All routes except `/api/health` and `/api/cron` need `Authorization: Bearer <Clerk session token>`.
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/ingest` | POST | Save a link `{ url, title?, text?, userNote? }` |
+| `/api/search` | GET | `q`, `platform`, `tags`, `dateFrom`, `dateTo`, `limit`, `offset`, `semantic` |
+| `/api/chat` | POST | `{ message, contextLimit?, filter? }` → answer + numbered citations |
+| `/api/clusters` | GET / POST | Latest clusters / regenerate now |
+| `/api/items/:id` | GET / PATCH / DELETE / POST | Read, edit `{ title?, userNote?, tags? }`, delete, `{ action: "reprocess" }` |
+| `/api/export` | GET | All saves as JSON |
+| `/api/health` | GET | Database connectivity (point an uptime monitor here) |
+| `/api/cron?job=clusters\|retry` | GET | Scheduled jobs, `Authorization: Bearer $CRON_SECRET` |
+
+## Environment variables
+
+Set these in Vercel (Production + Preview) and in local `.env` files. See `.env.example`.
+
+| Variable | Where | Notes |
+|---|---|---|
+| `TURSO_DATABASE_URL` | API | `libsql://<db>-<org>.turso.io` |
+| `TURSO_AUTH_TOKEN` | API | Create with no expiry; must belong to the same database |
+| `CLERK_SECRET_KEY` | API | |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Web (build time) | |
+| `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` | API | Workers AI token |
+| `CRON_SECRET` | API | `openssl rand -hex 32`; Vercel sends it to cron jobs automatically |
+| `ALLOWED_ORIGIN` | API, optional | Comma-separated CORS origins (defaults to production + localhost) |
+| `SEMANTIC_MAX_DISTANCE` | API, optional | Cosine-distance cut-off for semantic search (default `0.5`; lower = stricter) |
+
+## Development
 
 ```bash
-git clone <your-repo>
-cd mindspace
-pnpm install  # or npm install
+npm install
+npm run dev:api    # vercel dev (API + rewrites) on :3000
+npm run dev:web    # Vite on :5173, reachable from your phone on the same Wi-Fi
+npm test           # API unit tests
+npm run build      # what Vercel runs: type-check API, build PWA, build shared types
 ```
 
-### 2. Generate Icons
+Pushing to `main` deploys to production on Vercel.
 
-Open `apps/web/scripts/generate-icons.html` in a browser, click "Generate Icons", save all PNGs to `apps/web/public/icons/`.
+## Scheduled jobs
 
-Or use [PWA Builder Image Generator](https://www.pwabuilder.com/imageGenerator) with `public/icons/icon.svg`.
+| Job | Schedule (UTC) | What it does |
+|---|---|---|
+| `clusters` | 03:00 daily | Regenerates topic clusters for every user |
+| `retry` | 04:00 daily | Re-runs AI enrichment for saves still `pending`; gives up after 3 attempts (status `failed`, fixable with **Re-run AI**) |
 
-### 3. Environment Variables
+## Roadmap
 
-Copy `.env.example` to `.env` in both `apps/api` and `apps/web`:
+- Entity collections: recipe box, map of places, events calendar, wishlist
+- Video understanding for Reels/TikToks (transcripts, frame captions)
+- Weekly digest of things you saved but never opened
+- Import from Instagram saved posts, browser bookmarks, Pocket; export to Markdown / Obsidian
+- Browser extension for one-click desktop saves
+- Per-user rate limits on AI endpoints, Sentry error tracking
 
-```bash
-# apps/api/.env
-TURSO_DATABASE_URL=libsql://your-db.turso.io
-TURSO_AUTH_TOKEN=your-auth-token
-GEMINI_API_KEY=your-gemini-key
-CRON_SECRET=random-secret-for-cron-jobs
+## License
 
-# apps/web/.env (mostly for local dev)
-VITE_API_URL=http://localhost:3000/api
-```
-
-### 4. Local Development
-
-```bash
-# Terminal 1: Start API (Vercel dev)
-pnpm dev:api
-
-# Terminal 2: Start PWA
-pnpm dev:web
-```
-
-Open `http://localhost:5173` on your computer and phone (same WiFi).
-
-### 5. Test on iPhone
-
-1. Open `http://YOUR_MAC_IP:5173` in Safari on iPhone
-2. Tap Share → "Add to Home Screen"
-3. Open Instagram → Share a Reel → Select "MindSpace"
-4. Check the PWA — it should appear!
-
-### 6. Deploy to Vercel
-
-```bash
-# Push to GitHub
-git add .
-git commit -m "Initial commit"
-git push origin main
-
-# Import in Vercel dashboard
-# Add environment variables
-# Deploy!
-```
-
-Your PWA will be live at `https://your-project.vercel.app`.
-
-## 📱 How to Use
-
-### Save Content
-1. **Instagram/TikTok/X**: Tap Share → "MindSpace"
-2. **Safari/Chrome**: Tap Share → "MindSpace"
-3. **Any app with share sheet**: Share → "MindSpace"
-
-### Find Content
-- **Search**: Semantic + keyword search
-- **Chat**: "What did I save about React hooks?"
-- **Clusters**: Auto-generated topic groups
-- **Filters**: Platform, tags, date range
-
-### Keyboard Shortcuts (Web)
-- `⌘K` / `Ctrl+K`: Open search
-- `⌘N` / `Ctrl+N`: New chat
-- `/`: Focus search
-- `Esc`: Close modals
-
-## 🔧 Configuration
-
-### Custom AI Prompts
-
-In Settings → AI, you can override default prompts for:
-- Tagging
-- Summarization
-- Entity extraction
-- Chat behavior
-
-### Sync Settings
-
-- **Auto-sync**: Background sync every 15 min (configurable)
-- **Wi-Fi only**: Save cellular data
-- **Manual sync**: Pull-to-refresh or button
-
-### Theme
-
-- Light / Dark / System
-
-## 📊 Free Tier Limits
-
-| Service | Free Tier | MindSpace Usage |
-|---------|-----------|-----------------|
-| **Gemini 1.5 Flash** | 1,500 req/day | ~50 saves/day = 1,500/month ✅ |
-| **Gemini Embeddings** | Included | Same as above ✅ |
-| **Vercel Functions** | 100 GB-hrs/mo | ~1,500 invocations ✅ |
-| **Turso** | 9 GB, 1B reads | ~10 MB database ✅ |
-| **Vercel Hosting** | 100 GB bandwidth | PWA assets ✅ |
-
-**Total: $0/month**
-
-## 🛠️ Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | React 18, TypeScript, Vite, TanStack Query |
-| **Styling** | Tailwind CSS, shadcn/ui-inspired components |
-| **PWA** | vite-plugin-pwa (Workbox), Web Share Target API |
-| **Offline** | Dexie.js (IndexedDB), Background Sync API |
-| **Backend** | Vercel Edge Functions (TypeScript) |
-| **Database** | Turso (libSQL) with sqlite-vec for vectors |
-| **AI** | Google Gemini 1.5 Flash (free tier) |
-| **Deployment** | Vercel (auto-deploy from GitHub) |
-
-## 📁 Project Structure
-
-```
-mindspace/
-├── apps/
-│   ├── web/                 # PWA (React + Vite)
-│   │   ├── src/
-│   │   │   ├── components/  # UI components
-│   │   │   ├── pages/       # Route pages
-│   │   │   ├── hooks/       # React Query hooks
-│   │   │   ├── services/    # API, IndexedDB, Sync
-│   │   │   └── utils/       # Helpers
-│   │   └── public/          # Manifest, icons, SW
-│   │
-│   └── api/                 # Vercel Serverless Functions
-│       ├── *.ts             # API routes (ingest, search, chat, clusters, cron)
-│       └── lib/             # DB, Gemini, Extractor, Prompts
-│
-├── packages/
-│   └── shared/              # Shared TypeScript types
-│
-├── vercel.json              # Vercel config (routes, crons)
-├── package.json             # Monorepo scripts
-└── README.md
-```
-
-## 🔮 Future Enhancements
-
-- [ ] Safari Extension for full DOM extraction (rich tags from Reels)
-- [ ] Voice notes in share sheet
-- [ ] Map view for geo-tagged saves
-- [ ] Calendar view for events
-- [ ] Export/Import (JSON, Markdown, CSV)
-- [ ] Obsidian/Notion sync
-- [ ] Collaborative spaces
-- [ ] Local Ollama support (when you have a Mac)
-
-## 🤝 Contributing
-
-1. Fork the repo
-2. Create feature branch
-3. Make changes
-4. Submit PR
-
-## 📄 License
-
-MIT — Build your own mind space!
-
-## 🙏 Acknowledgments
-
-- [MyMind](https://mymind.com) for inspiration
-- [Stasht](https://stasht.app) for social media focus
-- [Recall](https://recall.ai) for AI knowledge base patterns
-- [Turso](https://turso.tech) for edge SQLite
-- [Vercel](https://vercel.com) for serverless platform
-- [Google Gemini](https://ai.google.dev) for free AI tier
+MIT

@@ -23,7 +23,9 @@ export function setCorsHeaders(
     ? configuredOrigin.split(',').map(o => o.trim()).filter(Boolean)
     : DEFAULT_ALLOWED_ORIGINS;
 
-  if (origin && (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app'))) {
+  // Exact production/dev origins, plus this project's own Vercel preview deployments
+  const isPreview = !!origin && /^https:\/\/curio-[a-z0-9-]+\.vercel\.app$/.test(origin);
+  if (origin && (allowedOrigins.includes(origin) || isPreview)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   } else {

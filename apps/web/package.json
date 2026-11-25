@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@clerk/react": "^6.19.1",
-    "@mindspace/shared": "*",
+    "@curio/shared": "*",
     "@radix-ui/react-slot": "^1.5.0",
     "@tanstack/react-query": "^5.24.0",
     "clsx": "^2.1.0",

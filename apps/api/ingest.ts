@@ -7,9 +7,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from './lib/auth.js';
 import { getDb, initializeSchema, rowToItem, upsertItem } from './lib/db.js';
-import { processItem, generateEmbedding } from './lib/gemini.js';
-import { decodeHtmlEntities, detectPlatform, enrichUrl, extractShortcode, buildCanonicalUrl } from './lib/extractor.js';
-import type { SavedItem, IngestResponse, ExtractedEntities } from './lib/types';
+import { enrichItem } from './lib/enrich.js';
+import { detectPlatform, extractShortcode, buildCanonicalUrl } from './lib/extractor.js';
+import type { IngestResponse } from './lib/types';
 
 // ============================================
 // Request Validation
@@ -21,18 +21,6 @@ const IngestSchema = z.object({
   text: z.string().optional(),
   userNote: z.string().optional(),
 });
-
-/** Keep only entities the AI actually filled in (drops empty / placeholder ones). */
-function cleanEntities(entities: ExtractedEntities | undefined): ExtractedEntities {
-  const cleaned: ExtractedEntities = {};
-  for (const [key, value] of Object.entries(entities ?? {})) {
-    if (!value || typeof value !== 'object') continue;
-    const name = (value as { name?: unknown }).name;
-    if (typeof name !== 'string' || !name.trim() || /^detected\s/i.test(name)) continue;
-    cleaned[key] = value;
-  }
-  return cleaned;
-}
 
 // ============================================
 // Handler
@@ -129,87 +117,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Saved earlier but never fully processed: fall through and finish the job
     }
 
-    // Enrich metadata from URL (best effort)
-    const enriched = await enrichUrl(canonicalUrl, platform);
-
-    // What the user actually shared (kept separate from the scraped caption)
-    const sharedTitle = title ? decodeHtmlEntities(title).trim() : undefined;
-    let sharedText = text ? decodeHtmlEntities(text).trim() : '';
-    if (sharedText === url || sharedText === enriched.description) sharedText = '';
-    const userProvidedNote = [userNote?.trim(), sharedText].filter(Boolean).join('\n\n');
-
-    // Everything the AI gets to read
-    const aiContext = [userProvidedNote, enriched.description].filter(Boolean).join('\n\n');
-
-    // For Instagram the scraped title is the clean caption; elsewhere prefer the shared title
-    const bestTitle =
-      platform === 'instagram'
-        ? (enriched.title ?? sharedTitle ?? null)
-        : (sharedTitle ?? enriched.title ?? null);
-
-    // Process with AI
-    let processed: Awaited<ReturnType<typeof processItem>>;
-    try {
-      processed = await processItem(url, platform, bestTitle, aiContext || null);
-    } catch (error) {
-      console.warn('[Ingest] AI enrichment unavailable; saving link without AI:', error);
-      processed = {
-        summary: aiContext || `Saved ${platform} link`,
-        tags: [],
-        entities: {},
-      };
-    }
-
-    const entities = cleanEntities(processed.entities);
-
-    // Generate embedding for semantic search
-    const embeddingText = [
-      bestTitle,
-      aiContext,
-      processed.summary,
-      processed.tags.join(' '),
-      Object.values(entities)
-        .flatMap(e => Object.values(e as Record<string, unknown>))
-        .filter(v => typeof v === 'string')
-        .join(' '),
-    ].filter(Boolean).join('\n');
-
-    let embedding: Float32Array | null = null;
-    try {
-      embedding = await generateEmbedding(embeddingText);
-    } catch (error) {
-      console.warn('[Ingest] Embedding unavailable; saving without semantic index:', error);
-    }
-
-    // Build item - ensure all optional fields are null not undefined
-    const now = new Date().toISOString();
-    const item: SavedItem = {
+    // Scrape, run AI and embed (shared with reprocess + the retry cron)
+    const item = await enrichItem({
       id: existingId ?? crypto.randomUUID(),
       userId,
       url: canonicalUrl,
       platform,
-      title: bestTitle,
-      userNote: userProvidedNote || null,
-      summary: processed.summary,
-      tags: [...new Set([...processed.tags, platform, ...(enriched.tags || [])])],
-      entities,
-      embedding: embedding ? Array.from(embedding) : null,
-      mediaUrl: enriched.mediaUrl ?? null,
-      thumbnailUrl: enriched.thumbnailUrl ?? null,
-      authorUsername: enriched.authorUsername ?? null,
-      authorDisplayName: enriched.authorDisplayName ?? null,
-      publishedAt: enriched.publishedAt ?? null,
-      savedAt: existingSavedAt ?? now,
-      updatedAt: now,
-      enrichmentStatus: embedding ? 'enriched' : 'pending',
-      enrichmentError: embedding ? null : 'Saved without semantic enrichment',
-    };
+      sharedTitle: title ?? null,
+      // Share sheets often send the (un-canonicalized) link itself as the text
+      sharedText: text && text.trim() !== url && text.trim() !== parseResult.data.url ? text : '',
+      userNote: userNote ?? null,
+      savedAt: existingSavedAt ?? new Date().toISOString(),
+    });
 
     // Store in database
     await upsertItem(item);
 
     // Return success (omit embedding for response size)
-    const { embedding: _, ...responseItem } = item;
+    const { embedding: _, enrichmentAttempts: _attempts, ...responseItem } = item;
     return res.status(200).json({
       success: true,
       item: responseItem,

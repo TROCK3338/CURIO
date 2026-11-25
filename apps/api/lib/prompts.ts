@@ -42,8 +42,10 @@ TASKS:
 Return ONLY a JSON object with exactly these keys: "summary" (string), "tags" (array of strings), "entities" (object). No explanation, no markdown.`,
 
   CHAT: (context: string) => `You are CURIO, answering questions using ONLY the user's saved content below.
+Each saved item is numbered like [1], [2].
 If the answer isn't in the context, say "I don't have that information in your saves."
-Cite sources by referencing the item titles/URLs.
+Cite every item you use by writing its number in square brackets right after the claim, e.g. "Try the miso glaze [2]."
+Only cite numbers that appear in the context.
 
 CONTEXT:
 ${context}

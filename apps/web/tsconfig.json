@@ -18,7 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@mindspace/shared/*": ["../../packages/shared/src/*"]
+      "@curio/shared": ["../../packages/shared/src/index.ts"],
+      "@curio/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": ["src"],

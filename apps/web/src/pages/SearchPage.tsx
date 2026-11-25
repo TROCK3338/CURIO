@@ -15,6 +15,7 @@ import { Avatar } from '../components/ui/Avatar';
 import { PlatformBadge } from '../components/ui/Badge';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '../utils/cn';
+import { displayAuthor, displayTitle } from '../utils/text';
 import { useSuccessToast, useErrorToast } from '../components/ui/Toast';
 
 export function SearchPage() {
@@ -263,7 +264,7 @@ function SearchResultItem({ item }: { item: any }) {
           <Link to={`/item/${item.id}`} className="relative shrink-0 w-28 h-20 rounded-lg overflow-hidden block">
             <Thumbnail
               src={item.thumbnailUrl}
-              alt={item.title || ''}
+              alt={displayTitle(item)}
               className="h-full w-full"
               imgClassName="group-hover:scale-105 transition-transform duration-300"
             >
@@ -273,7 +274,7 @@ function SearchResultItem({ item }: { item: any }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <h3 className="font-semibold line-clamp-1 group-hover:text-primary transition-colors">
-                <Link to={`/item/${item.id}`}>{item.title || `${item.platform || 'Saved'} link`}</Link>
+                <Link to={`/item/${item.id}`}>{displayTitle(item)}</Link>
               </h3>
               <a
                 href={item.url}
@@ -293,7 +294,7 @@ function SearchResultItem({ item }: { item: any }) {
               {item.tags.length > 5 && <Badge variant="outline" className="text-[11px]">+{item.tags.length - 5}</Badge>}
             </div>
             <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
-              <span className="capitalize font-medium">{item.authorDisplayName || item.authorUsername || item.platform}</span>
+              <span className="capitalize font-medium">{displayAuthor(item) || item.platform}</span>
               <span>{formatDistanceToNow(new Date(item.savedAt), { addSuffix: true })}</span>
             </div>
           </div>

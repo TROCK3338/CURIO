@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSettings, saveSettings, resetSettings, DEFAULT_SETTINGS, getPendingQueue } from '../services/indexeddb';
 import { initializeSync, stopSync, triggerManualSync, getSyncStatus } from '../services/sync';
-import type { UserSettings } from '@mindspace/shared';
+import type { UserSettings } from '@curio/shared';
 
 export function useSettings() {
   const [settings, setSettingsState] = useState<UserSettings>(DEFAULT_SETTINGS);
@@ -30,10 +30,17 @@ export function useSettings() {
       setIsLoading(false);
     };
     load();
+    const refreshSyncStatus = () => setSyncStatus(getSyncStatus());
+    window.addEventListener('sync-state', refreshSyncStatus);
+    window.addEventListener('online', refreshSyncStatus);
+    window.addEventListener('offline', refreshSyncStatus);
     window.addEventListener('queue-updated', refreshQueuedCount);
     window.addEventListener('sync-complete', refreshQueuedCount);
     window.addEventListener('sync-errors', refreshQueuedCount);
     return () => {
+      window.removeEventListener('sync-state', refreshSyncStatus);
+      window.removeEventListener('online', refreshSyncStatus);
+      window.removeEventListener('offline', refreshSyncStatus);
       window.removeEventListener('queue-updated', refreshQueuedCount);
       window.removeEventListener('sync-complete', refreshQueuedCount);
       window.removeEventListener('sync-errors', refreshQueuedCount);

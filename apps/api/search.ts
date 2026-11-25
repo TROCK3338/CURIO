@@ -7,7 +7,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from './lib/auth.js';
 import { initializeSchema, searchItems, semanticSearch } from './lib/db.js';
-import { generateEmbedding } from './lib/gemini.js';
+import { generateEmbedding } from './lib/ai.js';
 import type { SearchResponse } from './lib/types';
 
 const SearchSchema = z.object({

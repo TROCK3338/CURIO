@@ -128,12 +128,17 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@mindspace/shared': path.resolve(__dirname, '../../packages/shared/src'),
+      '@curio/shared': path.resolve(__dirname, '../../packages/shared/src'),
     },
   },
   server: {
     port: 5173,
     host: true, // Allow network access for testing on phone
+    // `CURIO_API_PROXY=https://curio-omega-tawny.vercel.app npm run dev:web` runs the local UI
+    // against a deployed API (handy when `vercel dev` isn't set up).
+    proxy: process.env.CURIO_API_PROXY
+      ? { '/api': { target: process.env.CURIO_API_PROXY, changeOrigin: true, secure: true } }
+      : undefined,
   },
   build: {
     target: 'es2022',
