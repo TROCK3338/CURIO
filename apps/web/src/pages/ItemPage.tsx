@@ -128,16 +128,16 @@ export function ItemPage() {
   };
 
   return (
-    <article className="pb-8">
-      {/* Hero */}
-      <div className="relative">
+    <article className="pb-8 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:items-start lg:gap-10">
+      {/* Hero: full-bleed on phones, a sticky framed image on laptops */}
+      <div className="relative lg:sticky lg:top-10 lg:overflow-hidden lg:rounded-[24px] lg:border">
         <Cover
           item={item}
           size="lg"
           onImageAvailable={setHeroImage}
-          className={cn('w-full', heroImage && meta.aspect === 'portrait' ? 'aspect-[4/5] max-h-[72vh]' : 'aspect-[16/10]')}
+          className={cn('w-full', heroImage && meta.aspect === 'portrait' ? 'aspect-[4/5] max-h-[72vh] lg:max-h-[calc(100dvh-5rem)]' : 'aspect-[16/10]')}
         />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-background to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-background to-transparent lg:hidden" />
         <div className="absolute inset-x-0 top-0 flex items-center justify-between p-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <button
             type="button"
@@ -158,7 +158,7 @@ export function ItemPage() {
         </div>
       </div>
 
-      <div className="relative -mt-6 space-y-6 px-5">
+      <div className="relative -mt-6 space-y-6 px-5 lg:mt-0 lg:px-0">
         <header className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
             <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold', meta.chip)}>

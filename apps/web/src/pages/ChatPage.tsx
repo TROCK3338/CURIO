@@ -88,8 +88,8 @@ export function ChatPage() {
   };
 
   return (
-    <div className="flex min-h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] flex-col">
-      <div className="flex-1 space-y-5 px-4 pb-44 pt-3">
+    <div className="flex min-h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] flex-col lg:min-h-[100dvh]">
+      <div className="flex-1 space-y-5 px-4 pb-44 pt-3 lg:mx-auto lg:w-full lg:max-w-3xl lg:px-10 lg:pb-36 lg:pt-10">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center pt-10 text-center">
             <span className="flex h-16 w-16 items-center justify-center rounded-[22px] bg-primary/20 text-primary">
@@ -99,7 +99,7 @@ export function ChatPage() {
             <p className="mt-2 max-w-xs text-sm text-muted-foreground">
               Answers come only from what you&rsquo;ve saved, with links back to each source.
             </p>
-            <div className="mt-8 grid w-full gap-2">
+            <div className="mt-8 grid w-full gap-2 sm:grid-cols-2">
               {SUGGESTIONS.map(s => (
                 <button key={s} type="button" onClick={() => send(s)} className="pressable rounded-2xl border bg-card px-4 py-3 text-left text-[15px] hover:border-primary/50">
                   {s}
@@ -164,7 +164,7 @@ export function ChatPage() {
       {/* Composer, floating above the tab bar */}
       <form
         onSubmit={onSubmit}
-        className="fixed inset-x-0 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-40 mx-auto max-w-xl px-4"
+        className="fixed inset-x-0 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-40 mx-auto max-w-xl px-4 lg:bottom-8 lg:left-64 lg:max-w-3xl lg:px-10"
       >
         <div className="glass flex items-end gap-2 rounded-[24px] border border-white/10 p-1.5 pl-4 shadow-lg">
           <textarea

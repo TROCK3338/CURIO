@@ -140,8 +140,8 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="space-y-7 pt-2">
-      <h1 className="screen-title">Settings</h1>
+    <div className="space-y-7 pt-2 lg:mx-auto lg:max-w-2xl">
+      <h1 className="screen-title lg:text-4xl">Settings</h1>
 
       <Group>
         <div className="flex items-center gap-3 px-4 py-4">

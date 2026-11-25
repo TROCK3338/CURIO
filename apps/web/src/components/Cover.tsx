@@ -130,7 +130,7 @@ function GeneratedCover({ item, showTitle, size }: { item: CoverItem; showTitle:
           <p
             className={cn(
               'font-display italic text-white leading-[1.05] line-clamp-4 text-balance',
-              size === 'lg' ? 'text-4xl' : size === 'md' ? 'text-[26px]' : 'text-base',
+              size === 'lg' ? 'text-4xl lg:text-[28px]' : size === 'md' ? 'text-[26px]' : 'text-base',
             )}
           >
             {title}

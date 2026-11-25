@@ -49,7 +49,7 @@ export function decodeEntities(input: string | null | undefined): string {
 // ---------- Captions & titles ----------
 
 const INSTAGRAM_META_PREFIX =
-  /^[\d.,KkMm]+\s+likes?,\s*[\d.,KkMm]+\s+comments?\s*-\s*[^:]*?\s+on\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4}:\s*/;
+  /^[\d.,KkMm]+\s+likes?,\s*[\d.,KkMm]+\s+comments?\s*-\s*[^:]*?\s+on\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4}(?::\s*|\s*$)/;
 
 /** Removes the "1,387 likes, 12 comments - user on Nov 14, 2026:" noise and wrapping quotes. */
 export function cleanCaption(input: string | null | undefined): string {

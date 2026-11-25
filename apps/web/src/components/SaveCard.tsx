@@ -70,13 +70,14 @@ export function SaveCard({ item, priority = false }: { item: SavedItem; priority
   const tall = hasImage && meta.aspect === 'portrait';
 
   return (
-    <article className="overflow-hidden rounded-[26px] border bg-card animate-in">
+    <article className="flex h-full flex-col overflow-hidden rounded-[26px] border bg-card animate-in lg:rounded-[22px] lg:transition-colors lg:hover:border-primary/40">
       <Link to={`/item/${item.id}`} className="block" aria-label={title}>
         <Cover
           item={item}
           size="lg"
           onImageAvailable={setHasImage}
-          className={cn(tall ? 'aspect-[4/5]' : 'aspect-[16/10]', priority && 'bg-elevated')}
+          // Phones: tall Reels; laptops: one tidy shape so the grid lines up
+          className={cn(tall ? 'aspect-[4/5]' : 'aspect-[16/10]', 'lg:aspect-[4/3]', priority && 'bg-elevated')}
         >
           <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
             <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-sm', meta.chip)}>
@@ -95,7 +96,7 @@ export function SaveCard({ item, priority = false }: { item: SavedItem; priority
         </Cover>
       </Link>
 
-      <div className="space-y-2.5 p-4">
+      <div className="flex flex-1 flex-col gap-2.5 p-4">
         <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-elevated text-[11px] font-bold uppercase text-foreground">
             {author.replace('@', '').charAt(0) || '•'}
@@ -113,7 +114,7 @@ export function SaveCard({ item, priority = false }: { item: SavedItem; priority
           )}
         </Link>
 
-        <div className="flex items-center gap-2 pt-0.5">
+        <div className="mt-auto flex items-center gap-2 pt-0.5">
           <div className="no-scrollbar flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
             {tags.map(tag => (
               <Link
@@ -176,7 +177,7 @@ export function SaveRow({ item, subtitle, className }: { item: SavedItem; subtit
 export function SaveCardSkeleton() {
   return (
     <div className="overflow-hidden rounded-[26px] border bg-card">
-      <div className="aspect-[4/5] animate-pulse bg-elevated" />
+      <div className="aspect-[4/5] animate-pulse bg-elevated lg:aspect-[4/3]" />
       <div className="space-y-3 p-4">
         <div className="h-3 w-1/3 animate-pulse rounded-full bg-elevated" />
         <div className="h-4 w-4/5 animate-pulse rounded-full bg-elevated" />

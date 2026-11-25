@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, RefreshCw, Sparkles, WifiOff } from 'lucide-react';
+import { ChevronRight, Link2, RefreshCw, Sparkles, WifiOff } from 'lucide-react';
 import type { SavedItem } from '@curio/shared';
 import { useClusters, useFacets, useInfiniteSearch, useLocalItems } from '../hooks/useItems';
 import { saveItemLocally } from '../services/indexeddb';
@@ -60,15 +60,18 @@ export function HomePage() {
 
   return (
     <div className="space-y-6">
-      <section className="pt-2">
-        <p className="text-[15px] text-muted-foreground">{greeting()}</p>
-        <h1 className="screen-title">Your library</h1>
-        {total > 0 && (
-          <p className="mt-1 text-sm text-muted-foreground">
-            {total} {total === 1 ? 'save' : 'saves'}
-            {thisWeek > 0 && <> · <span className="text-foreground">{thisWeek} new this week</span></>}
-          </p>
-        )}
+      <section className="pt-2 lg:flex lg:items-end lg:justify-between lg:gap-8 lg:pt-0">
+        <div>
+          <p className="text-[15px] text-muted-foreground">{greeting()}</p>
+          <h1 className="screen-title lg:text-4xl">Your library</h1>
+          {total > 0 && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {total} {total === 1 ? 'save' : 'saves'}
+              {thisWeek > 0 && <> · <span className="text-foreground">{thisWeek} new this week</span></>}
+            </p>
+          )}
+        </div>
+        <QuickPaste onSave={openSave} />
       </section>
 
       {offline && (
@@ -149,22 +152,47 @@ export function HomePage() {
         </div>
       )}
 
-      <section className="space-y-5" aria-label="Saves">
-        {feed.isLoading && !offline && [0, 1].map(i => <SaveCardSkeleton key={i} />)}
-        {items.map((item, i) => <SaveCard key={item.id} item={item} priority={i < 2} />)}
+      <section aria-label="Saves">
+        <div className="grid gap-5 lg:grid-cols-2 lg:gap-6 xl:grid-cols-3">
+          {feed.isLoading && !offline && [0, 1, 2].map(i => <SaveCardSkeleton key={i} />)}
+          {items.map((item, i) => <SaveCard key={item.id} item={item} priority={i < 3} />)}
+          {feed.isFetchingNextPage && <SaveCardSkeleton />}
+        </div>
         <div ref={sentinel} />
-        {feed.isFetchingNextPage && <SaveCardSkeleton />}
         {!feed.hasNextPage && items.length > 3 && (
-          <p className="py-6 text-center text-sm text-muted-foreground">You&rsquo;re all caught up ✨</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">You&rsquo;re all caught up ✨</p>
         )}
       </section>
     </div>
   );
 }
 
+/** Laptop-only: paste a link straight into the page header. */
+function QuickPaste({ onSave }: { onSave: (url?: string) => void }) {
+  const [value, setValue] = useState('');
+  return (
+    <form
+      onSubmit={e => { e.preventDefault(); onSave(value.trim()); setValue(''); }}
+      className="mt-0 hidden w-full max-w-md items-center gap-2 rounded-2xl border bg-card p-1.5 pl-4 focus-within:border-primary/60 lg:flex"
+    >
+      <Link2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <input
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        placeholder="Paste a link to save…"
+        className="h-9 min-w-0 flex-1 bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none"
+        aria-label="Link to save"
+      />
+      <button type="submit" disabled={!value.trim()} className="h-9 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-40">
+        Save
+      </button>
+    </form>
+  );
+}
+
 function EmptyLibrary({ onSave }: { onSave: () => void }) {
   return (
-    <section className="rounded-[28px] border bg-gradient-to-br from-primary/20 via-card to-card p-6 text-center">
+    <section className="rounded-[28px] border bg-gradient-to-br from-primary/20 via-card to-card p-6 text-center lg:mx-auto lg:max-w-xl lg:p-10">
       <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-[22px] bg-primary/20 text-3xl">🪄</div>
       <h2 className="font-display text-3xl italic">Start your collection</h2>
       <p className="mx-auto mt-2 max-w-xs text-sm text-muted-foreground">

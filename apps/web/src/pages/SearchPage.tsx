@@ -88,9 +88,9 @@ export function SearchPage() {
 
   return (
     <div className="space-y-5 pt-2">
-      <h1 className="screen-title">Search</h1>
+      <h1 className="screen-title lg:text-4xl">Search</h1>
 
-      <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-30 -mx-4 bg-background/85 px-4 pb-2 pt-1 backdrop-blur-xl">
+      <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-30 -mx-4 bg-background/85 px-4 pb-2 pt-1 backdrop-blur-xl lg:top-0 lg:mx-0 lg:max-w-3xl lg:px-0 lg:pt-4">
         <div className="flex items-center gap-2 rounded-2xl border bg-card px-3.5 focus-within:border-primary/60">
           <SearchIcon className="h-5 w-5 shrink-0 text-muted-foreground" />
           <input
@@ -126,7 +126,7 @@ export function SearchPage() {
       </div>
 
       {!active && (
-        <div className="space-y-7">
+        <div className="space-y-7 lg:max-w-3xl">
           {recents.length > 0 && (
             <section className="space-y-2">
               <div className="flex items-center justify-between">
@@ -171,8 +171,10 @@ export function SearchPage() {
           <p className={cn('pb-2 text-sm text-muted-foreground', search.isFetching && 'animate-pulse')}>
             {search.isLoading ? 'Searching…' : offline ? `${total} found on this device (offline)` : `${total} ${total === 1 ? 'result' : 'results'}`}
           </p>
-          {search.isLoading && [0, 1, 2, 3].map(i => <SaveRowSkeleton key={i} />)}
-          {results.map(item => <SaveRow key={item.id} item={item} />)}
+          <div className="lg:grid lg:grid-cols-2 lg:gap-x-8 lg:gap-y-1">
+            {search.isLoading && [0, 1, 2, 3].map(i => <SaveRowSkeleton key={i} />)}
+            {results.map(item => <SaveRow key={item.id} item={item} />)}
+          </div>
           {!search.isLoading && results.length === 0 && (
             <div className="rounded-[22px] border bg-card p-6 text-center">
               <p className="text-3xl">🔭</p>

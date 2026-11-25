@@ -33,11 +33,11 @@ export function CollectionsPage() {
   return (
     <div className="space-y-8 pt-2">
       <header>
-        <h1 className="screen-title">Collections</h1>
+        <h1 className="screen-title lg:text-4xl">Collections</h1>
         <p className="mt-1 text-sm text-muted-foreground">Sorted automatically from what CURIO finds in your saves.</p>
       </header>
 
-      <section className="grid grid-cols-2 gap-3">
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5 lg:gap-4">
         {COLLECTION_TYPES.map(type => {
           const c = COLLECTIONS[type];
           const count = facets?.entities?.[type] ?? 0;
@@ -81,12 +81,12 @@ export function CollectionsPage() {
             Topics appear once you have at least 5 saves. They refresh every night.
           </p>
         ) : (
-          <div className="divide-y overflow-hidden rounded-[22px] border bg-card">
+          <div className="divide-y overflow-hidden rounded-[22px] border bg-card lg:grid lg:grid-cols-2 lg:divide-y-0 lg:gap-px lg:bg-border">
             {clusters.map(cluster => (
               <Link
                 key={cluster.id}
                 to={`/search?q=${encodeURIComponent(cluster.label)}`}
-                className="flex items-center gap-3 p-4 hover:bg-accent/50"
+                className="flex items-center gap-3 bg-card p-4 hover:bg-accent/50"
               >
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary">
                   <Sparkles className="h-5 w-5" />
@@ -143,7 +143,7 @@ function CollectionList({ type }: { type: CollectionType }) {
       <Link to="/collections" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> Collections
       </Link>
-      <header className={cn('rounded-[28px] border bg-gradient-to-br p-5', meta.tint)}>
+      <header className={cn('rounded-[28px] border bg-gradient-to-br p-5 lg:p-8', meta.tint)}>
         <span className="text-4xl" aria-hidden="true">{meta.emoji}</span>
         <h1 className="screen-title mt-3">{meta.title}</h1>
         <p className="text-sm text-muted-foreground">
@@ -159,7 +159,7 @@ function CollectionList({ type }: { type: CollectionType }) {
         </p>
       )}
 
-      <div className={cn(type === 'recipe' || type === 'product' ? 'grid grid-cols-2 gap-3' : 'space-y-3')}>
+      <div className={cn(type === 'recipe' || type === 'product' ? 'grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 lg:gap-4' : 'space-y-3 lg:grid lg:grid-cols-2 lg:gap-3 lg:space-y-0')}>
         {items.map(item => (
           <EntityCard key={item.id} type={type} item={item} />
         ))}
