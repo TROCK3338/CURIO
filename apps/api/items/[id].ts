@@ -3,15 +3,16 @@
  *   GET    - fetch one saved item
  *   PATCH  - edit title, note and/or tags  { title?, userNote?, tags? }
  *            mark done / move back           { done: boolean }
- *   DELETE - delete the save
+ *   DELETE - move to Recently deleted (?permanent=1 erases it now)
  *   POST   - re-run AI enrichment          { action: "reprocess" }
  *            re-scrape the preview image    { action: "refresh-media" }
+ *            restore from Recently deleted   { action: "restore" }
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from '../lib/auth.js';
-import { deleteItem, getItem, initializeSchema, setItemDone, updateItemFields, updateItemMedia, upsertItem } from '../lib/db.js';
+import { deleteItem, getItem, initializeSchema, restoreItem, setItemDone, trashItem, updateItemFields, updateItemMedia, upsertItem } from '../lib/db.js';
 import { decodeHtmlEntities, enrichUrl } from '../lib/extractor.js';
 import { buildEmbeddingText, enrichItem } from '../lib/enrich.js';
 import { generateEmbedding } from '../lib/ai.js';
@@ -24,7 +25,7 @@ const PatchSchema = z.object({
   done: z.boolean().optional(),
 }).strict();
 
-const PostSchema = z.object({ action: z.enum(['reprocess', 'refresh-media']) });
+const PostSchema = z.object({ action: z.enum(['reprocess', 'refresh-media', 'restore']) });
 
 function toResponse(item: SavedItem & { enrichmentAttempts?: number }) {
   const { embedding: _embedding, enrichmentAttempts: _attempts, ...rest } = item;
@@ -49,9 +50,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!id) return res.status(400).json({ error: 'Missing item id' });
 
     if (req.method === 'DELETE') {
-      const deleted = await deleteItem(id, userId);
-      if (!deleted) return res.status(404).json({ error: 'Item not found' });
-      return res.status(200).json({ success: true, id });
+      const permanent = req.query.permanent === '1' || req.query.permanent === 'true';
+      if (permanent) {
+        if (!(await deleteItem(id, userId))) return res.status(404).json({ error: 'Item not found' });
+        return res.status(200).json({ success: true, id, permanent: true });
+      }
+      if (!(await trashItem(id, userId))) {
+        // Already in Recently deleted counts as success; anything else is a 404
+        const existing = await getItem(id, userId);
+        if (!existing) return res.status(404).json({ error: 'Item not found' });
+      }
+      return res.status(200).json({ success: true, id, permanent: false });
     }
 
     const item = await getItem(id, userId);
@@ -101,7 +110,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // POST: reprocess
     const parsed = PostSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: 'Unknown action', available: ['reprocess', 'refresh-media'] });
+      return res.status(400).json({ error: 'Unknown action', available: ['reprocess', 'refresh-media', 'restore'] });
+    }
+
+    if (parsed.data.action === 'restore') {
+      await restoreItem(id, userId);
+      return res.status(200).json(toResponse((await getItem(id, userId)) ?? item));
     }
 
     if (parsed.data.action === 'refresh-media') {

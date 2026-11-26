@@ -210,6 +210,10 @@ export function initializeSchema(): Promise<void> {
       if (!itemColumns.rows.some(r => String(r.name) === 'done_at')) {
         await client.execute(`ALTER TABLE items ADD COLUMN done_at TEXT`);
       }
+      // "Recently deleted": kept for TRASH_RETENTION_DAYS, then purged by the daily cron
+      if (!itemColumns.rows.some(r => String(r.name) === 'deleted_at')) {
+        await client.execute(`ALTER TABLE items ADD COLUMN deleted_at TEXT`);
+      }
       await client.batch([
         `CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id, saved_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_clusters_user_id ON clusters(user_id, generated_at DESC)`,
@@ -234,7 +238,7 @@ function embeddingToBlob(embedding: number[] | null): Buffer | null {
 /** Every column except the embedding BLOB (~3 KB per row) for list/search queries. */
 const ITEM_COLUMNS = `id, user_id, url, platform, title, user_note, summary, tags, entities,
   media_url, thumbnail_url, author_username, author_display_name, published_at,
-  saved_at, updated_at, enrichment_status, enrichment_error, done_at`;
+  saved_at, updated_at, enrichment_status, enrichment_error, done_at, deleted_at`;
 
 export type StoredItem = SavedItem & { enrichmentAttempts?: number };
 
@@ -305,6 +309,37 @@ export async function getItem(id: string, userId: string): Promise<StoredItem | 
   return { ...rowToItem(row), enrichmentAttempts: Number(row.attempts ?? 0) };
 }
 
+/** Days a deleted save stays in Recently deleted before it's erased for good. */
+export const TRASH_RETENTION_DAYS = 7;
+
+/** Moves a save to Recently deleted (hidden everywhere, restorable for TRASH_RETENTION_DAYS). */
+export async function trashItem(id: string, userId: string): Promise<boolean> {
+  const result = await getDb().execute({
+    sql: `UPDATE items SET deleted_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    args: [new Date().toISOString(), id, userId],
+  });
+  return (result.rowsAffected ?? 0) > 0;
+}
+
+export async function restoreItem(id: string, userId: string): Promise<boolean> {
+  const result = await getDb().execute({
+    sql: `UPDATE items SET deleted_at = NULL WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL`,
+    args: [id, userId],
+  });
+  return (result.rowsAffected ?? 0) > 0;
+}
+
+/** Erases saves deleted more than TRASH_RETENTION_DAYS ago (all users). Returns how many. */
+export async function purgeDeletedItems(): Promise<number> {
+  const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 86400_000).toISOString();
+  const result = await getDb().execute({
+    sql: `DELETE FROM items WHERE deleted_at IS NOT NULL AND deleted_at < ?`,
+    args: [cutoff],
+  });
+  return result.rowsAffected ?? 0;
+}
+
+/** Erases a save immediately ("Delete now"). */
 export async function deleteItem(id: string, userId: string): Promise<boolean> {
   const db = getDb();
   const result = await db.execute({
@@ -360,7 +395,7 @@ export async function getItemsToRetry(limit = 10): Promise<StoredItem[]> {
   const result = await getDb().execute({
     sql: `SELECT ${ITEM_COLUMNS}, COALESCE(enrichment_attempts, 0) AS attempts
           FROM items
-          WHERE enrichment_status = 'pending' AND updated_at < ?
+          WHERE enrichment_status = 'pending' AND deleted_at IS NULL AND updated_at < ?
           ORDER BY updated_at ASC
           LIMIT ?`,
     args: [staleBefore, limit],
@@ -402,6 +437,7 @@ export function rowToItem(row: Record<string, unknown>): SavedItem {
     enrichmentStatus: row.enrichment_status as SavedItem['enrichmentStatus'],
     enrichmentError: row.enrichment_error as string | null,
     doneAt: (row.done_at as string | null | undefined) ?? null,
+    deletedAt: (row.deleted_at as string | null | undefined) ?? null,
   };
 }
 
@@ -422,8 +458,8 @@ export interface SearchFilters {
   enrichmentStatus?: string;
   entity?: EntityType;
   excludeId?: string;
-  /** active = not done, done = only done, all (default) = both */
-  status?: 'active' | 'done' | 'all';
+  /** active = not done, done = only done, all (default) = both; deleted = Recently deleted only */
+  status?: 'active' | 'done' | 'all' | 'deleted';
 }
 
 function buildFilterConditions(filters: SearchFilters): { conditions: string[]; args: (string | number)[] } {
@@ -469,6 +505,8 @@ function buildFilterConditions(filters: SearchFilters): { conditions: string[]; 
     conditions.push(`json_type(entities, '$.${filters.entity}') = 'object'`);
   }
 
+  // Deleted saves only ever show up in the Recently deleted list
+  conditions.push(filters.status === 'deleted' ? `deleted_at IS NOT NULL` : `deleted_at IS NULL`);
   if (filters.status === 'active') conditions.push(`done_at IS NULL`);
   if (filters.status === 'done') conditions.push(`done_at IS NOT NULL`);
 
@@ -592,6 +630,8 @@ export interface LibraryFacets {
   /** Active (not done) saves; every other count below also skips done saves */
   total: number;
   done: number;
+  /** Saves in Recently deleted */
+  deleted: number;
   platforms: Record<string, number>;
   entities: Record<EntityType, number>;
   tags: Array<{ tag: string; count: number }>;
@@ -604,23 +644,26 @@ export async function getLibraryFacets(userId: string): Promise<LibraryFacets> {
     t => `SUM(CASE WHEN json_type(entities, '$.${t}') = 'object' THEN 1 ELSE 0 END) AS ${t}`,
   ).join(', ');
 
-  const [totals, platforms, tags, done] = await Promise.all([
-    db.execute({ sql: `SELECT COUNT(*) AS total, ${entityCounts} FROM items WHERE user_id = ? AND done_at IS NULL`, args: [userId] }),
-    db.execute({ sql: `SELECT platform, COUNT(*) AS n FROM items WHERE user_id = ? AND done_at IS NULL GROUP BY platform ORDER BY n DESC`, args: [userId] }),
+  const active = `done_at IS NULL AND deleted_at IS NULL`;
+  const [totals, platforms, tags, done, deleted] = await Promise.all([
+    db.execute({ sql: `SELECT COUNT(*) AS total, ${entityCounts} FROM items WHERE user_id = ? AND ${active}`, args: [userId] }),
+    db.execute({ sql: `SELECT platform, COUNT(*) AS n FROM items WHERE user_id = ? AND ${active} GROUP BY platform ORDER BY n DESC`, args: [userId] }),
     db.execute({
       sql: `SELECT j.value AS tag, COUNT(*) AS n
             FROM items, json_each(items.tags) AS j
-            WHERE items.user_id = ? AND items.done_at IS NULL AND json_valid(items.tags)
+            WHERE items.user_id = ? AND items.done_at IS NULL AND items.deleted_at IS NULL AND json_valid(items.tags)
             GROUP BY j.value ORDER BY n DESC LIMIT 40`,
       args: [userId],
     }),
-    db.execute({ sql: `SELECT COUNT(*) AS n FROM items WHERE user_id = ? AND done_at IS NOT NULL`, args: [userId] }),
+    db.execute({ sql: `SELECT COUNT(*) AS n FROM items WHERE user_id = ? AND done_at IS NOT NULL AND deleted_at IS NULL`, args: [userId] }),
+    db.execute({ sql: `SELECT COUNT(*) AS n FROM items WHERE user_id = ? AND deleted_at IS NOT NULL`, args: [userId] }),
   ]);
 
   const row = (totals.rows[0] ?? {}) as Record<string, unknown>;
   return {
     total: Number(row.total ?? 0),
     done: Number(done.rows[0]?.n ?? 0),
+    deleted: Number(deleted.rows[0]?.n ?? 0),
     platforms: Object.fromEntries(platforms.rows.map(r => [String(r.platform), Number(r.n)])),
     entities: Object.fromEntries(ENTITY_TYPES.map(t => [t, Number(row[t] ?? 0)])) as Record<EntityType, number>,
     tags: tags.rows.map(r => ({ tag: String(r.tag), count: Number(r.n) })),
@@ -644,7 +687,7 @@ export async function updateItemMedia(
 export async function getItemsForClustering(userId: string, limit = 1000): Promise<SavedItem[]> {
   const result = await getDb().execute({
     sql: `SELECT ${ITEM_COLUMNS} FROM items
-          WHERE user_id = ? AND enrichment_status = 'enriched' AND done_at IS NULL
+          WHERE user_id = ? AND enrichment_status = 'enriched' AND done_at IS NULL AND deleted_at IS NULL
           ORDER BY saved_at DESC LIMIT ?`,
     args: [userId, limit],
   });

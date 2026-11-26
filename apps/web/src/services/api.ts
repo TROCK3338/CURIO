@@ -75,13 +75,15 @@ export interface SearchParams {
   /** Saves similar to this item id */
   relatedTo?: string;
   /** active = not done, done = only done, all. Server default: all when searching, else active */
-  status?: 'active' | 'done' | 'all';
+  status?: 'active' | 'done' | 'all' | 'deleted';
 }
 
 export interface LibraryFacets {
   /** Active saves; done saves are left out of every count except `done` */
   total: number;
   done?: number;
+  /** Saves in Recently deleted */
+  deleted?: number;
   platforms: Record<string, number>;
   entities: Record<string, number>;
   tags: Array<{ tag: string; count: number }>;
@@ -170,8 +172,20 @@ export async function updateItem(id: string, edits: ItemEdits): Promise<SavedIte
   });
 }
 
-export async function deleteItem(id: string): Promise<void> {
-  await fetchJson<{ success: boolean }>(`/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+/** Days a deleted save stays in Recently deleted (matches the server). */
+export const TRASH_RETENTION_DAYS = 7;
+
+/** Moves a save to Recently deleted, or erases it now with `permanent`. */
+export async function deleteItem(id: string, permanent = false): Promise<void> {
+  await fetchJson<{ success: boolean }>(`/items/${encodeURIComponent(id)}${permanent ? '?permanent=1' : ''}`, { method: 'DELETE' });
+}
+
+/** Brings a save back from Recently deleted. */
+export async function restoreItem(id: string): Promise<SavedItem> {
+  return fetchJson<SavedItem>(`/items/${encodeURIComponent(id)}`, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'restore' }),
+  });
 }
 
 /** Re-run AI summary, tags, entities and embedding for a save. */

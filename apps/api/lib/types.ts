@@ -85,6 +85,8 @@ export interface SavedItem {
   enrichmentError: string | null;
   /** When the user marked it done (hidden from the library); null = active */
   doneAt?: string | null;
+  /** When the user deleted it (in Recently deleted); null = not deleted */
+  deletedAt?: string | null;
 }
 
 export interface ExtractedEntities {

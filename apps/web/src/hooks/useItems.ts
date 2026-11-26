@@ -5,7 +5,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
-import { searchItems, chatWithSaves, getClusters, regenerateClusters, ingestItem, updateItem, deleteItem, reprocessItem, getFacets, type SearchParams, type ItemEdits } from '../services/api';
+import { searchItems, chatWithSaves, getClusters, regenerateClusters, ingestItem, updateItem, deleteItem, restoreItem, reprocessItem, getFacets, type SearchParams, type ItemEdits } from '../services/api';
 import { getItemsLocally, saveItemLocally, searchItemsLocally, deleteItemLocally } from '../services/indexeddb';
 import type { SavedItem, SearchResponse, ChatParams, IngestRequest, IngestResponse } from '@curio/shared';
 
@@ -171,11 +171,12 @@ export function useUpdateItem() {
   });
 }
 
+/** Moves a save to Recently deleted, or erases it now with `permanent: true`. */
 export function useDeleteItem() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      await deleteItem(id);
+    mutationFn: async ({ id, permanent = false }: { id: string; permanent?: boolean }) => {
+      await deleteItem(id, permanent);
       return id;
     },
     onSuccess: async (id) => {
@@ -221,6 +222,17 @@ export function useSetDone() {
       await saveItemLocally(item);
     },
     onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+    },
+  });
+}
+
+export function useRestoreItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => restoreItem(id),
+    onSuccess: async (item) => {
+      await saveItemLocally(item);
       queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
     },
   });

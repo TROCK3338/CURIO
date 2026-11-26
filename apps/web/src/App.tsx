@@ -11,6 +11,7 @@ import { ShareTargetPage } from './pages/ShareTargetPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CollectionPage, CollectionsPage } from './pages/CollectionsPage';
 import { OnboardingPage } from './pages/OnboardingPage';
+import { DeletedPage } from './pages/DeletedPage';
 import { setAuthTokenGetter } from './services/api';
 import { hasOnboarded } from './utils/install';
 
@@ -54,6 +55,7 @@ function SignedInRoutes() {
         <Route path="collections/:type" element={<CollectionPage />} />
         <Route path="item/:id" element={<ItemPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/deleted" element={<DeletedPage />} />
       </Route>
       <Route path="welcome" element={<OnboardingPage />} />
       {/* Web Share Target + iOS Shortcut entry point */}

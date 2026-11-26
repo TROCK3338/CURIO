@@ -21,12 +21,13 @@ import {
 import type { SavedItem } from '@curio/shared';
 import { getItemLocally } from '../services/indexeddb';
 import { getItem } from '../services/api';
-import { useDeleteItem, useRelatedItems, useReprocessItem, useUpdateItem } from '../hooks/useItems';
+import { useDeleteItem, useRelatedItems, useReprocessItem, useRestoreItem, useUpdateItem } from '../hooks/useItems';
+import { TRASH_RETENTION_DAYS } from '../services/api';
 import { useToggleDone } from '../hooks/useDone';
 import { Cover } from '../components/Cover';
 import { Sheet } from '../components/Sheet';
 import { SaveRow, SaveRowSkeleton, shareItem, timeAgo } from '../components/SaveCard';
-import { useErrorToast, useSuccessToast } from '../components/ui/Toast';
+import { useErrorToast, useSuccessToast, useToast } from '../components/ui/Toast';
 import { COLLECTIONS, calendarUrl, isCollectionType, mapsUrl } from '../utils/collections';
 import { hostnameOf, platformMeta } from '../utils/platform';
 import { cleanCaption, cleanEntities, decodeEntities, displayAuthor, displayTitle, topicTags } from '../utils/text';
@@ -40,6 +41,8 @@ export function ItemPage() {
   const errorToast = useErrorToast();
   const updateMutation = useUpdateItem();
   const deleteMutation = useDeleteItem();
+  const restoreMutation = useRestoreItem();
+  const { toast } = useToast();
   const reprocessMutation = useReprocessItem();
   const related = useRelatedItems(id, 6);
 
@@ -123,10 +126,25 @@ export function ItemPage() {
     });
   };
 
+  const restore = () => {
+    restoreMutation.mutate(item.id, {
+      onSuccess: restored => { setItem(restored); successToast('Restored', 'Back in your library'); },
+      onError: e => errorToast('Couldn’t restore', e instanceof Error ? e.message : undefined),
+    });
+  };
+
   const remove = () => {
-    deleteMutation.mutate(item.id, {
+    const id = item.id;
+    deleteMutation.mutate({ id }, {
       onSuccess: () => {
-        successToast('Deleted');
+        setConfirmDelete(false);
+        toast({
+          type: 'success',
+          title: 'Moved to Recently deleted',
+          description: `Erased for good after ${TRASH_RETENTION_DAYS} days`,
+          action: { label: 'Undo', onClick: () => restoreMutation.mutate(id) },
+          duration: 6000,
+        });
         navigate('/', { replace: true });
       },
       onError: e => errorToast('Couldn’t delete', e instanceof Error ? e.message : undefined),
@@ -175,7 +193,16 @@ export function ItemPage() {
           </div>
           <h1 className="text-[26px] font-bold leading-tight tracking-tight text-balance">{title}</h1>
           <StatusBanner item={item} busy={reprocessMutation.isPending} onRetry={reprocess} />
-          {item.doneAt && (
+          {item.deletedAt && (
+            <div className="flex items-center gap-2 rounded-2xl border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-sm">
+              <Trash2 className="h-4 w-4 shrink-0 text-destructive" />
+              <span className="flex-1 text-muted-foreground">In Recently deleted. {daysLeftText(item.deletedAt)}</span>
+              <button type="button" onClick={restore} disabled={restoreMutation.isPending} className="shrink-0 font-semibold text-primary disabled:opacity-50">
+                Restore
+              </button>
+            </div>
+          )}
+          {item.doneAt && !item.deletedAt && (
             <div className="flex items-center gap-2 rounded-2xl border bg-card px-3.5 py-2.5 text-sm">
               <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
               <span className="flex-1 text-muted-foreground">Marked done. Hidden from your library, still in search.</span>
@@ -290,13 +317,15 @@ export function ItemPage() {
           />
         </div>
         <div className="mt-3 overflow-hidden rounded-2xl border bg-elevated">
-          <MenuRow icon={Trash2} label="Delete save" danger onClick={() => { setMenuOpen(false); setConfirmDelete(true); }} />
+          {item.deletedAt
+            ? <MenuRow icon={RotateCcw} label="Restore save" onClick={() => { setMenuOpen(false); restore(); }} />
+            : <MenuRow icon={Trash2} label="Delete save" danger onClick={() => { setMenuOpen(false); setConfirmDelete(true); }} />}
         </div>
       </Sheet>
 
       {/* Delete confirmation */}
       <Sheet open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete this save?">
-        <p className="text-sm text-muted-foreground">&ldquo;{title}&rdquo; will be removed from CURIO. This can&rsquo;t be undone.</p>
+        <p className="text-sm text-muted-foreground">&ldquo;{title}&rdquo; moves to Recently deleted. You can restore it from Settings for {TRASH_RETENTION_DAYS} days, then it&rsquo;s erased for good.</p>
         <div className="mt-5 grid grid-cols-2 gap-2">
           <button type="button" onClick={() => setConfirmDelete(false)} className="h-12 rounded-2xl border bg-elevated font-semibold">Cancel</button>
           <button
@@ -345,6 +374,14 @@ function StatusBanner({ item, busy, onRetry }: { item: SavedItem; busy: boolean;
       )}
     </div>
   );
+}
+
+/** "Erased in 3 days" style countdown for a save in Recently deleted. */
+export function daysLeftText(deletedAt: string): string {
+  const msLeft = new Date(deletedAt).getTime() + TRASH_RETENTION_DAYS * 86400_000 - Date.now();
+  const days = Math.ceil(msLeft / 86400_000);
+  if (days <= 0) return 'Erased within a day.';
+  return `Erased in ${days} ${days === 1 ? 'day' : 'days'}.`;
 }
 
 function MenuRow({ icon: Icon, label, hint, danger, onClick }: { icon: typeof Pencil; label: string; hint?: string; danger?: boolean; onClick: () => void }) {

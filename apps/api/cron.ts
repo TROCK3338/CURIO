@@ -1,11 +1,12 @@
 /**
  * Cron Jobs (scheduled in vercel.json)
- *   ?job=clusters - regenerate every user's clusters
+ *   ?job=clusters - erase saves deleted over 7 days ago, then regenerate every user's clusters
+ *   ?job=purge    - only the erase step
  *   ?job=retry    - re-run AI enrichment for saves that missed it
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDb, getItemsToRetry, initializeSchema, upsertItem } from './lib/db.js';
+import { getDb, getItemsToRetry, initializeSchema, purgeDeletedItems, upsertItem } from './lib/db.js';
 import { regenerateClustersForUser } from './lib/clustering.js';
 import { enrichItem } from './lib/enrich.js';
 
@@ -26,13 +27,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { job } = req.query;
     switch (job) {
-      case 'clusters':
-        return res.status(200).json({ success: true, job, ...(await runClusterGeneration()) });
+      case 'clusters': {
+        // Rides on the daily clusters schedule so no extra cron slot is needed
+        const purged = await purgeDeletedItems();
+        return res.status(200).json({ success: true, job, purged, ...(await runClusterGeneration()) });
+      }
+      case 'purge':
+        return res.status(200).json({ success: true, job, purged: await purgeDeletedItems() });
       case 'retry':
       case 'cleanup': // old schedule name, kept so a stale cron config still does something useful
         return res.status(200).json({ success: true, job: 'retry', ...(await runEnrichmentRetry()) });
       default:
-        return res.status(400).json({ error: 'Unknown job', available: ['clusters', 'retry'] });
+        return res.status(400).json({ error: 'Unknown job', available: ['clusters', 'purge', 'retry'] });
     }
   } catch (error) {
     console.error('[Cron] Error:', error);

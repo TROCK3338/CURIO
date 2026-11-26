@@ -5,7 +5,8 @@
  *   ?relatedTo=<itemId>     saves similar to one item
  *   ?facets=1               counts per platform / collection / tag (no items)
  * Filters: platform, tags, dateFrom, dateTo, limit, offset, semantic
- *   status=active|done|all  default: all when searching (q / relatedTo), else active
+ *   status=active|done|all|deleted  default: all when searching (q / relatedTo), else active;
+ *   deleted saves only appear with status=deleted (Recently deleted)
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -42,7 +43,7 @@ const SearchSchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
   offset: z.coerce.number().min(0).default(0),
   semantic: boolParam.default(true),
-  status: z.enum(['active', 'done', 'all']).optional(),
+  status: z.enum(['active', 'done', 'all', 'deleted']).optional(),
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

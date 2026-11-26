@@ -15,12 +15,13 @@ import {
   Share2,
   Smartphone,
   Sun,
+  Trash2,
   Upload,
   UserRound,
   type LucideIcon,
 } from 'lucide-react';
 import { useSettings } from '../hooks/useSettings';
-import { downloadExport } from '../services/api';
+import { downloadExport, TRASH_RETENTION_DAYS } from '../services/api';
 import { addToQueue, clearAllItems } from '../services/indexeddb';
 import { triggerManualSync } from '../services/sync';
 import { findUrl } from '../services/save';
@@ -213,6 +214,7 @@ export function SettingsPage() {
       <Group title="Your data">
         <Row icon={exporting ? Loader2 : Download} label="Export all saves" hint="JSON file with every link, note, summary and tag" onClick={exportAll} disabled={exporting} />
         <Row icon={Upload} label="Import links" hint="A CURIO export or any text file with links" onClick={() => fileRef.current?.click()} />
+        <Row icon={Trash2} label="Recently deleted" hint={`Restore deleted saves for ${TRASH_RETENTION_DAYS} days`} to="/settings/deleted" />
         <Row icon={HardDrive} label="Clear this device’s cache" hint="Doesn’t delete anything from your account" onClick={() => setConfirmClear(true)} />
       </Group>
       <input
