@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Link2, RefreshCw, Sparkles, WifiOff } from 'lucide-react';
+import { ChevronRight, CheckCircle2, Link2, RefreshCw, Sparkles, WifiOff } from 'lucide-react';
 import type { SavedItem } from '@curio/shared';
 import { useClusters, useFacets, useInfiniteSearch, useLocalItems } from '../hooks/useItems';
 import { saveItemLocally } from '../services/indexeddb';
@@ -23,16 +23,23 @@ function greeting(): string {
 export function HomePage() {
   const openSave = useOpenSaveSheet();
   const [platform, setPlatform] = useState<string>('');
+  // "Done" shows the saves the user has finished with; everything else shows active ones
+  const [showDone, setShowDone] = useState(false);
   const { data: facets } = useFacets();
   const { data: clustersData } = useClusters();
-  const feed = useInfiniteSearch({ limit: PAGE_SIZE, ...(platform ? { platform } : {}) });
+  const feed = useInfiniteSearch({
+    limit: PAGE_SIZE,
+    status: showDone ? 'done' : 'active',
+    ...(platform && !showDone ? { platform } : {}),
+  });
   const cached = useLocalItems(40, 0);
 
   const serverItems = useMemo(() => feed.data?.pages.flatMap(p => p.items) ?? [], [feed.data]);
   const offline = feed.isError && serverItems.length === 0;
-  const items: SavedItem[] = offline
+  const items: SavedItem[] = (offline
     ? (cached.data ?? []).filter(i => !platform || i.platform === platform)
-    : serverItems;
+    : serverItems
+  ).filter(i => Boolean(i.doneAt) === showDone); // a card leaves as soon as it's marked
 
   // Keep an offline copy of what the user has seen
   useEffect(() => {
@@ -56,7 +63,9 @@ export function HomePage() {
   const collectionTiles = COLLECTION_TYPES.filter(t => (facets?.entities?.[t] ?? 0) > 0);
   const clusters = clustersData?.clusters ?? [];
   const platforms = Object.entries(facets?.platforms ?? {}).filter(([, n]) => n > 0);
-  const isEmpty = !feed.isLoading && !offline && total === 0;
+  const doneCount = facets?.done ?? 0;
+  const isEmpty = !feed.isLoading && !offline && total === 0 && doneCount === 0;
+  const pick = (p: string, done: boolean) => { setPlatform(p); setShowDone(done); };
 
   return (
     <div className="space-y-6">
@@ -128,9 +137,9 @@ export function HomePage() {
         </section>
       )}
 
-      {platforms.length > 1 && (
-        <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4" role="tablist" aria-label="Filter by platform">
-          <button type="button" role="tab" aria-selected={!platform} onClick={() => setPlatform('')} className={cn('chip', !platform && 'chip-active')}>
+      {(platforms.length > 1 || doneCount > 0 || showDone) && (
+        <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4" role="tablist" aria-label="Filter saves">
+          <button type="button" role="tab" aria-selected={!platform && !showDone} onClick={() => pick('', false)} className={cn('chip', !platform && !showDone && 'chip-active')}>
             All
           </button>
           {platforms.map(([p, n]) => {
@@ -141,15 +150,32 @@ export function HomePage() {
                 key={p}
                 type="button"
                 role="tab"
-                aria-selected={platform === p}
-                onClick={() => setPlatform(platform === p ? '' : p)}
-                className={cn('chip', platform === p && 'chip-active')}
+                aria-selected={platform === p && !showDone}
+                onClick={() => pick(platform === p && !showDone ? '' : p, false)}
+                className={cn('chip', platform === p && !showDone && 'chip-active')}
               >
                 <Icon className="h-3.5 w-3.5" /> {meta.label} <span className="opacity-60">{n}</span>
               </button>
             );
           })}
+          {(doneCount > 0 || showDone) && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={showDone}
+              onClick={() => pick('', !showDone)}
+              className={cn('chip', showDone && 'chip-active')}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" /> Done <span className="opacity-60">{doneCount}</span>
+            </button>
+          )}
         </div>
+      )}
+
+      {showDone && !feed.isLoading && items.length === 0 && (
+        <p className="rounded-2xl border bg-card p-5 text-center text-sm text-muted-foreground">
+          Nothing marked done yet. Tap <CheckCircle2 className="inline h-4 w-4 align-[-3px]" /> on a save once you&rsquo;ve dealt with it.
+        </p>
       )}
 
       <section aria-label="Saves">
@@ -159,7 +185,7 @@ export function HomePage() {
           {feed.isFetchingNextPage && <SaveCardSkeleton />}
         </div>
         <div ref={sentinel} />
-        {!feed.hasNextPage && items.length > 3 && (
+        {!showDone && !feed.hasNextPage && items.length > 3 && (
           <p className="py-8 text-center text-sm text-muted-foreground">You&rsquo;re all caught up ✨</p>
         )}
       </section>

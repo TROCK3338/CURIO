@@ -74,10 +74,14 @@ export interface SearchParams {
   entity?: string;
   /** Saves similar to this item id */
   relatedTo?: string;
+  /** active = not done, done = only done, all. Server default: all when searching, else active */
+  status?: 'active' | 'done' | 'all';
 }
 
 export interface LibraryFacets {
+  /** Active saves; done saves are left out of every count except `done` */
   total: number;
+  done?: number;
   platforms: Record<string, number>;
   entities: Record<string, number>;
   tags: Array<{ tag: string; count: number }>;
@@ -155,6 +159,8 @@ export interface ItemEdits {
   title?: string | null;
   userNote?: string | null;
   tags?: string[];
+  /** Mark done (hidden from the library, still searchable) or move back */
+  done?: boolean;
 }
 
 export async function updateItem(id: string, edits: ItemEdits): Promise<SavedItem> {

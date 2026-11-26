@@ -8,6 +8,8 @@ interface Toast {
   description?: string;
   type: 'success' | 'error' | 'info' | 'loading';
   duration?: number;
+  /** Optional button, e.g. Undo; tapping it also closes the toast */
+  action?: { label: string; onClick: () => void };
 }
 
 const ToastContext = createContext<{
@@ -91,6 +93,15 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
           <p className="mt-1 text-sm text-muted-foreground">{toast.description}</p>
         )}
       </div>
+      {toast.action && (
+        <button
+          type="button"
+          onClick={() => { toast.action?.onClick(); onDismiss(toast.id); }}
+          className="flex-shrink-0 rounded-full px-2 text-sm font-semibold text-primary hover:underline"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button
         onClick={() => onDismiss(toast.id)}
         className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"

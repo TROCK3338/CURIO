@@ -2,6 +2,7 @@
  * /api/items/:id
  *   GET    - fetch one saved item
  *   PATCH  - edit title, note and/or tags  { title?, userNote?, tags? }
+ *            mark done / move back           { done: boolean }
  *   DELETE - delete the save
  *   POST   - re-run AI enrichment          { action: "reprocess" }
  *            re-scrape the preview image    { action: "refresh-media" }
@@ -10,7 +11,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 import { requireAuth, setCorsHeaders } from '../lib/auth.js';
-import { deleteItem, getItem, initializeSchema, updateItemFields, updateItemMedia, upsertItem } from '../lib/db.js';
+import { deleteItem, getItem, initializeSchema, setItemDone, updateItemFields, updateItemMedia, upsertItem } from '../lib/db.js';
 import { decodeHtmlEntities, enrichUrl } from '../lib/extractor.js';
 import { buildEmbeddingText, enrichItem } from '../lib/enrich.js';
 import { generateEmbedding } from '../lib/ai.js';
@@ -20,6 +21,7 @@ const PatchSchema = z.object({
   title: z.string().trim().max(500).nullable().optional(),
   userNote: z.string().trim().max(10_000).nullable().optional(),
   tags: z.array(z.string().trim().toLowerCase().min(1).max(40)).max(30).optional(),
+  done: z.boolean().optional(),
 }).strict();
 
 const PostSchema = z.object({ action: z.enum(['reprocess', 'refresh-media']) });
@@ -65,11 +67,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() });
       }
 
+      const { done, ...edits } = parsed.data;
+      if (done !== undefined) await setItemDone(id, userId, done);
+      // Marking done changes nothing the AI reads, so skip re-embedding
+      if (Object.keys(edits).length === 0) {
+        return res.status(200).json(toResponse((await getItem(id, userId)) ?? item));
+      }
+
       const fields = {
-        ...parsed.data,
-        title: parsed.data.title === '' ? null : parsed.data.title,
-        userNote: parsed.data.userNote === '' ? null : parsed.data.userNote,
-        tags: parsed.data.tags ? [...new Set(parsed.data.tags)] : undefined,
+        ...edits,
+        title: edits.title === '' ? null : edits.title,
+        userNote: edits.userNote === '' ? null : edits.userNote,
+        tags: edits.tags ? [...new Set(edits.tags)] : undefined,
       };
       const updated: SavedItem = {
         ...item,

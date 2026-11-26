@@ -82,6 +82,8 @@ export interface SavedItem {
   updatedAt: string;
   enrichmentStatus: 'pending' | 'enriched' | 'failed';
   enrichmentError: string | null;
+  /** When the user marked it done (hidden from the library); null = active */
+  doneAt?: string | null;
 }
 
 export interface ExtractedEntities {

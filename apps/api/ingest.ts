@@ -89,7 +89,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Check if already saved for this user or legacy
     const db = getDb();
     const existing = await db.execute({
-      sql: `SELECT id, user_id, saved_at, enrichment_status, (embedding IS NOT NULL) AS has_embedding
+      sql: `SELECT id, user_id, saved_at, enrichment_status, done_at, (embedding IS NOT NULL) AS has_embedding
             FROM items 
             WHERE (url = ? OR url = ?) AND (user_id = ? OR user_id = 'legacy')
             ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END LIMIT 1`,
@@ -112,6 +112,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
+      // Saving something again that was marked done brings it back to the library
+      if (row.done_at) {
+        await db.execute({
+          sql: 'UPDATE items SET done_at = NULL WHERE id = ? AND user_id = ?',
+          args: [existingId, userId],
+        });
+      }
+
       const isComplete = row.enrichment_status === 'enriched' && Number(row.has_embedding) === 1;
       if (isComplete) {
         const existingItem = await db.execute({
@@ -123,7 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           success: true,
           item: savedItem,
           message: 'Already saved',
-          notification: notificationText('Already in CURIO', savedItem.title, savedItem.platform),
+          notification: notificationText(row.done_at ? 'Back in your library' : 'Already in CURIO', savedItem.title, savedItem.platform),
         });
       }
       // Saved earlier but never fully processed: fall through and finish the job

@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   CalendarPlus,
+  CheckCircle2,
   Clock,
   Copy,
   Loader2,
@@ -12,6 +13,7 @@ import {
   MoreHorizontal,
   Pencil,
   RefreshCw,
+  RotateCcw,
   Share,
   Sparkles,
   Trash2,
@@ -20,6 +22,7 @@ import type { SavedItem } from '@curio/shared';
 import { getItemLocally } from '../services/indexeddb';
 import { getItem } from '../services/api';
 import { useDeleteItem, useRelatedItems, useReprocessItem, useUpdateItem } from '../hooks/useItems';
+import { useToggleDone } from '../hooks/useDone';
 import { Cover } from '../components/Cover';
 import { Sheet } from '../components/Sheet';
 import { SaveRow, SaveRowSkeleton, shareItem, timeAgo } from '../components/SaveCard';
@@ -46,6 +49,9 @@ export function ItemPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [heroImage, setHeroImage] = useState(true);
+  const [toggleDone] = useToggleDone(done =>
+    setItem(prev => (prev ? { ...prev, doneAt: done ? new Date().toISOString() : null } : prev)),
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -169,6 +175,15 @@ export function ItemPage() {
           </div>
           <h1 className="text-[26px] font-bold leading-tight tracking-tight text-balance">{title}</h1>
           <StatusBanner item={item} busy={reprocessMutation.isPending} onRetry={reprocess} />
+          {item.doneAt && (
+            <div className="flex items-center gap-2 rounded-2xl border bg-card px-3.5 py-2.5 text-sm">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
+              <span className="flex-1 text-muted-foreground">Marked done. Hidden from your library, still in search.</span>
+              <button type="button" onClick={() => toggleDone(item.id, false)} className="shrink-0 font-semibold text-primary">
+                Move back
+              </button>
+            </div>
+          )}
         </header>
 
         <div className="flex gap-2">
@@ -187,6 +202,19 @@ export function ItemPage() {
             aria-label="Share"
           >
             <Share className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleDone(item.id, !item.doneAt)}
+            className={cn(
+              'pressable flex h-12 w-12 items-center justify-center rounded-2xl border',
+              item.doneAt ? 'border-primary/50 bg-primary/15 text-primary' : 'bg-card',
+            )}
+            aria-label={item.doneAt ? 'Move back to library' : 'Mark done'}
+            aria-pressed={Boolean(item.doneAt)}
+            title={item.doneAt ? 'Move back to library' : 'Mark done'}
+          >
+            <CheckCircle2 className="h-5 w-5" />
           </button>
           <button
             type="button"
@@ -254,6 +282,12 @@ export function ItemPage() {
           <MenuRow icon={Pencil} label="Edit title, note & tags" onClick={() => { setMenuOpen(false); setEditOpen(true); }} />
           <MenuRow icon={RefreshCw} label="Re-run AI" hint="Fresh summary, tags and details" onClick={reprocess} />
           <MenuRow icon={Copy} label="Copy link" onClick={() => { setMenuOpen(false); void copyLink(); }} />
+          <MenuRow
+            icon={item.doneAt ? RotateCcw : CheckCircle2}
+            label={item.doneAt ? 'Move back to library' : 'Mark done'}
+            hint={item.doneAt ? undefined : 'Hide from your library; it stays in search'}
+            onClick={() => { setMenuOpen(false); toggleDone(item.id, !item.doneAt); }}
+          />
         </div>
         <div className="mt-3 overflow-hidden rounded-2xl border bg-elevated">
           <MenuRow icon={Trash2} label="Delete save" danger onClick={() => { setMenuOpen(false); setConfirmDelete(true); }} />

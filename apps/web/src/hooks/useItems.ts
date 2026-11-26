@@ -199,6 +199,33 @@ export function useDeleteItem() {
   });
 }
 
+/** Mark a save done (or move it back). Lists update right away; the server confirms. */
+export function useSetDone() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, done }: { id: string; done: boolean }) => updateItem(id, { done }),
+    onMutate: async ({ id, done }) => {
+      await queryClient.cancelQueries({ queryKey: ITEMS_QUERY_KEY });
+      const doneAt = done ? new Date().toISOString() : null;
+      const patch = (i: SavedItem) => (i.id === id ? { ...i, doneAt } : i);
+      queryClient.setQueriesData({ queryKey: ITEMS_QUERY_KEY, exact: false }, (old: any) => {
+        if (old?.pages) {
+          // Feeds hide cards whose done state no longer matches, so they leave instantly
+          return { ...old, pages: old.pages.map((p: any) => ({ ...p, items: p.items.map(patch) })) };
+        }
+        if (old?.items) return { ...old, items: old.items.map(patch) };
+        return old;
+      });
+    },
+    onSuccess: async (item) => {
+      await saveItemLocally(item);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+    },
+  });
+}
+
 export function useReprocessItem() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowUpRight, Clock, Share, AlertCircle, ChevronRight } from 'lucide-react';
+import { ArrowUpRight, Clock, Share, AlertCircle, ChevronRight, CheckCircle2, RotateCcw } from 'lucide-react';
 import { format } from 'date-fns';
 import type { SavedItem } from '@curio/shared';
 import { Cover } from './Cover';
@@ -9,6 +9,7 @@ import { platformMeta } from '../utils/platform';
 import { COLLECTIONS, isCollectionType } from '../utils/collections';
 import { cleanEntities, cleanCaption, decodeEntities, displayAuthor, displayTitle, topicTags } from '../utils/text';
 import { useSuccessToast } from './ui/Toast';
+import { useToggleDone } from '../hooks/useDone';
 
 /** Short relative time: "now", "5m", "3h", "2d", then "Nov 12" / "Nov 12, 2025". */
 export function timeAgo(iso: string | null | undefined): string {
@@ -58,6 +59,8 @@ function StatusPill({ item }: { item: SavedItem }) {
 /** Big feed card used on Home and in collections. */
 export function SaveCard({ item, priority = false }: { item: SavedItem; priority?: boolean }) {
   const successToast = useSuccessToast();
+  const [toggleDone] = useToggleDone();
+  const isDone = Boolean(item.doneAt);
   const meta = platformMeta(item.platform);
   const PlatformIcon = meta.icon;
   const title = displayTitle(item);
@@ -128,6 +131,15 @@ export function SaveCard({ item, priority = false }: { item: SavedItem; priority
           </div>
           <button
             type="button"
+            onClick={() => toggleDone(item.id, !isDone)}
+            className="pressable rounded-full p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={isDone ? 'Move back to library' : 'Mark done'}
+            title={isDone ? 'Move back to library' : 'Mark done'}
+          >
+            {isDone ? <RotateCcw className="h-[18px] w-[18px]" /> : <CheckCircle2 className="h-5 w-5" />}
+          </button>
+          <button
+            type="button"
             onClick={() => shareItem(item, () => successToast('Link copied'))}
             className="pressable rounded-full p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label="Share"
@@ -167,6 +179,11 @@ export function SaveRow({ item, subtitle, className }: { item: SavedItem; subtit
         {summary && <p className="mt-0.5 text-[13.5px] text-muted-foreground line-clamp-2">{summary}</p>}
         <p className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
           <PlatformIcon className="h-3 w-3" /> {meta.label} · {timeAgo(item.savedAt)}
+          {item.doneAt && (
+            <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-elevated px-1.5 py-px font-medium">
+              <CheckCircle2 className="h-3 w-3" /> Done
+            </span>
+          )}
         </p>
       </div>
       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />

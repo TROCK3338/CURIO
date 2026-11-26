@@ -5,6 +5,7 @@
  *   ?relatedTo=<itemId>     saves similar to one item
  *   ?facets=1               counts per platform / collection / tag (no items)
  * Filters: platform, tags, dateFrom, dateTo, limit, offset, semantic
+ *   status=active|done|all  default: all when searching (q / relatedTo), else active
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -41,6 +42,7 @@ const SearchSchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
   offset: z.coerce.number().min(0).default(0),
   semantic: boolParam.default(true),
+  status: z.enum(['active', 'done', 'all']).optional(),
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -63,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const { q, platform, tags, entity, relatedTo, facets, dateFrom, dateTo, limit, offset, semantic } = parseResult.data;
+    const { q, platform, tags, entity, relatedTo, facets, dateFrom, dateTo, limit, offset, semantic, status } = parseResult.data;
 
     if (facets) {
       return res.status(200).json(await getLibraryFacets(userId));
@@ -76,6 +78,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       tags: tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
       dateFrom,
       dateTo,
+      // Browsing hides done saves; searching still finds them
+      status: status ?? (q.trim() || relatedTo ? 'all' : 'active'),
     };
 
     let result;
