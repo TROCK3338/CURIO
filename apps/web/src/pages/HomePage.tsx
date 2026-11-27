@@ -6,6 +6,7 @@ import { useClusters, useFacets, useInfiniteSearch, useLocalItems } from '../hoo
 import { saveItemLocally } from '../services/indexeddb';
 import { SaveCard, SaveCardSkeleton } from '../components/SaveCard';
 import { useOpenSaveSheet } from '../components/Layout';
+import { QuickSaveNudge } from '../components/QuickSaveNudge';
 import { COLLECTIONS, COLLECTION_TYPES } from '../utils/collections';
 import { platformMeta } from '../utils/platform';
 import { cn } from '../utils/cn';
@@ -82,6 +83,8 @@ export function HomePage() {
         </div>
         <QuickPaste onSave={openSave} />
       </section>
+
+      {!isEmpty && <QuickSaveNudge />}
 
       {offline && (
         <div className="flex items-center gap-3 rounded-2xl border bg-card p-3 text-sm">
