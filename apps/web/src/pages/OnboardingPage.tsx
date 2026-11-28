@@ -189,8 +189,8 @@ function ShareSetup() {
 
   return (
     <>
-      <StepHeader emoji="⚡️" title="Save from your iPhone share sheet">
-        iPhone doesn&rsquo;t let web apps join the share sheet directly, so a one-time Shortcut does it, silently, without leaving the app you&rsquo;re in.
+      <StepHeader emoji="⚡️" title="Save from any app">
+        Share a Reel to CURIO and stay where you are.
       </StepHeader>
       <div className="mt-8">
         <QuickSaveSetup compact />
