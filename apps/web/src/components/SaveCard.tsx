@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowUpRight, Clock, Share, AlertCircle, ChevronRight, CheckCircle2, RotateCcw } from 'lucide-react';
+import { ArrowUpRight, Clock, Share, AlertCircle, ChevronRight, CheckCircle2, MoreHorizontal, RotateCcw } from 'lucide-react';
 import { format } from 'date-fns';
 import type { SavedItem } from '@curio/shared';
 import { Cover } from './Cover';
@@ -212,6 +212,85 @@ export function SaveRowSkeleton() {
         <div className="h-4 w-3/4 animate-pulse rounded-full bg-elevated" />
         <div className="h-3 w-1/2 animate-pulse rounded-full bg-elevated" />
       </div>
+    </div>
+  );
+}
+
+/* ============================================
+   Pinterest-style masonry card
+   ============================================ */
+
+/** Real image shapes seen this session, so remounted cards don't jump. */
+const measuredRatios = new Map<string, number>();
+const clampRatio = (r: number) => Math.min(1.8, Math.max(0.56, r));
+
+/** Height/width of a card's image before it loads (used to place and size cards). */
+export function pinRatio(item: SavedItem): number {
+  const known = measuredRatios.get(item.id);
+  if (known) return known;
+  if (item.thumbnailUrl) return platformMeta(item.platform).aspect === 'portrait' ? 1.25 : 0.62;
+  // Generated covers: vary the shape a little so the grid feels organic
+  const shapes = [1, 1.25, 1.33, 1.1];
+  let h = 0;
+  for (const c of item.id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return shapes[h % shapes.length];
+}
+
+/** Image at its natural shape, a small platform mark, then one line of title and a ⋯ menu. */
+export function PinCard({ item, onMenu }: { item: SavedItem; onMenu: (item: SavedItem) => void }) {
+  const meta = platformMeta(item.platform);
+  const PlatformIcon = meta.icon;
+  const title = displayTitle(item);
+  const [ratio, setRatio] = useState(() => pinRatio(item));
+
+  return (
+    <article className="animate-in">
+      <Link to={`/item/${item.id}`} className="block" aria-label={title}>
+        <div className="relative" style={{ paddingBottom: `${ratio * 100}%` }}>
+          <Cover
+            item={item}
+            size="md"
+            onNaturalSize={(w, h) => {
+              if (!w || !h) return;
+              const r = clampRatio(h / w);
+              measuredRatios.set(item.id, r);
+              setRatio(r);
+            }}
+            className="!absolute inset-0 rounded-[18px] lg:rounded-2xl"
+          >
+            <span className="pointer-events-none absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-md">
+              <PlatformIcon className="h-3.5 w-3.5" />
+            </span>
+            {item.enrichmentStatus === 'pending' && (
+              <span className="pointer-events-none absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-md" title="AI is still reading this">
+                <Clock className="h-3.5 w-3.5" />
+              </span>
+            )}
+          </Cover>
+        </div>
+      </Link>
+      <div className="flex items-start gap-1 px-1 pt-1.5">
+        <Link to={`/item/${item.id}`} className="min-w-0 flex-1 text-[13.5px] font-medium leading-snug line-clamp-1">
+          {title}
+        </Link>
+        <button
+          type="button"
+          onClick={() => onMenu(item)}
+          className="-mr-1 -mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label={`More actions for ${title}`}
+        >
+          <MoreHorizontal className="h-[18px] w-[18px]" />
+        </button>
+      </div>
+    </article>
+  );
+}
+
+export function PinCardSkeleton({ tall = false }: { tall?: boolean }) {
+  return (
+    <div>
+      <div className={cn('animate-pulse rounded-[18px] bg-elevated', tall ? 'aspect-[4/5]' : 'aspect-square')} />
+      <div className="mt-2 h-3 w-3/4 animate-pulse rounded-full bg-elevated" />
     </div>
   );
 }

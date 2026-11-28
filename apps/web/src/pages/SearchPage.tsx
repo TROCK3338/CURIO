@@ -88,7 +88,12 @@ export function SearchPage() {
 
   return (
     <div className="space-y-5 pt-2">
-      <h1 className="screen-title lg:text-4xl">Search</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="screen-title lg:text-4xl">Search</h1>
+        <Link to="/chat" className="pressable flex items-center gap-1.5 rounded-full bg-primary/15 px-3.5 py-2 text-sm font-semibold text-primary">
+          <MessageCircle className="h-4 w-4" /> Ask
+        </Link>
+      </div>
 
       <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-30 -mx-4 bg-background/85 px-4 pb-2 pt-1 backdrop-blur-xl lg:top-0 lg:mx-0 lg:max-w-3xl lg:px-0 lg:pt-4">
         <div className="flex items-center gap-2 rounded-2xl border bg-card px-3.5 focus-within:border-primary/60">

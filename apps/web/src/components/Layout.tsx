@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { UserButton, useUser } from '@clerk/react';
-import { Home, Layers, MessageCircle, Plus, Search, Settings2 } from 'lucide-react';
+import { Home, Layers, MessageCircle, Plus, Search, Settings2, UserRound } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useKeyboardShortcuts, useSettings } from '../hooks/useSettings';
 import { findUrl } from '../services/save';
@@ -21,10 +21,17 @@ const NAV = [
   { path: '/chat', label: 'Ask', icon: MessageCircle },
 ] as const;
 
+/** Phones: three icon-only buttons, Pinterest style. Ask lives in Search, Save is the top bar's +. */
+const PHONE_NAV = [
+  { path: '/', label: 'Home', icon: Home },
+  { path: '/search', label: 'Search', icon: Search },
+  { path: '/settings', label: 'You', icon: UserRound },
+] as const;
+
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
 /**
- * App shell. Phones: glass top bar + floating tab bar with a center Save button.
+ * App shell. Phones: slim top bar (logo + Save) and three floating icon buttons.
  * Laptops (lg+): a fixed left sidebar and a wide content area.
  */
 export function Layout() {
@@ -161,18 +168,14 @@ export function Layout() {
                 </Link>
                 {syncBadge && <span className="ml-1">{syncBadge}</span>}
                 <div className="flex-1" />
-                <NavLink
-                  to="/settings"
-                  className={({ isActive: active }) =>
-                    cn('rounded-full p-2 text-muted-foreground hover:bg-accent hover:text-foreground', active && 'text-foreground')
-                  }
-                  aria-label="Settings"
+                <button
+                  type="button"
+                  onClick={() => openSave()}
+                  className="pressable flex h-9 w-9 items-center justify-center rounded-full bg-foreground text-background"
+                  aria-label="Save a link"
                 >
-                  <Settings2 className="h-5 w-5" />
-                </NavLink>
-                <div className="flex h-8 w-8 items-center justify-center">
-                  <UserButton />
-                </div>
+                  <Plus className="h-5 w-5" strokeWidth={2.5} />
+                </button>
               </div>
             </header>
           )}
@@ -188,44 +191,34 @@ export function Layout() {
           </main>
         </div>
 
-        {/* ---------- Phone tab bar ---------- */}
+        {/* ---------- Phone tab bar: three floating icon buttons ---------- */}
         <nav
           aria-label="Main"
-          className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-xl px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:hidden"
+          className="fixed inset-x-0 bottom-[max(0.75rem,calc(env(safe-area-inset-bottom)+0.25rem))] z-50 flex justify-center gap-2 lg:hidden"
         >
-          <div className="glass flex items-center justify-between rounded-[26px] border border-white/10 px-2 py-1.5 shadow-[0_10px_40px_rgba(0,0,0,0.35)]">
-            {[NAV[0], NAV[1], null, NAV[2], NAV[3]].map(item => {
-              if (!item) {
-                return (
-                  <button
-                    key="save"
-                    type="button"
-                    onClick={() => openSave()}
-                    className="pressable -my-4 flex h-14 w-14 items-center justify-center rounded-[20px] bg-primary text-primary-foreground shadow-[0_8px_24px_hsl(var(--primary)/0.45)]"
-                    aria-label="Save a link"
-                  >
-                    <Plus className="h-7 w-7" strokeWidth={2.5} />
-                  </button>
-                );
-              }
-              const Icon = item.icon;
-              const active = isActive(item.path);
-              return (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={cn(
-                    'flex w-16 flex-col items-center gap-0.5 rounded-2xl py-1.5 text-[10.5px] font-medium transition-colors',
-                    active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                  aria-current={active ? 'page' : undefined}
-                >
-                  <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 2.4 : 1.8} />
-                  {item.label}
-                </NavLink>
-              );
-            })}
-          </div>
+          {PHONE_NAV.map(item => {
+            const Icon = item.icon;
+            const active = isActive(item.path);
+            const avatar = item.path === '/settings' && user?.imageUrl;
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                aria-label={item.label}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'pressable glass flex h-[52px] w-[52px] items-center justify-center rounded-[18px] border border-white/10 shadow-[0_8px_28px_rgba(0,0,0,0.4)] transition-colors',
+                  active ? 'text-foreground' : 'text-muted-foreground',
+                )}
+              >
+                {avatar ? (
+                  <img src={user.imageUrl} alt="" className={cn('h-7 w-7 rounded-full object-cover', active && 'ring-2 ring-foreground ring-offset-2 ring-offset-background')} />
+                ) : (
+                  <Icon className="h-6 w-6" strokeWidth={active ? 2.6 : 1.9} />
+                )}
+              </NavLink>
+            );
+          })}
         </nav>
 
         <SaveSheet open={saveOpen} onClose={() => setSaveOpen(false)} initialUrl={saveUrl} />

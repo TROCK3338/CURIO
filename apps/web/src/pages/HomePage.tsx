@@ -1,46 +1,59 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ChevronRight, CheckCircle2, Link2, RefreshCw, Sparkles, WifiOff } from 'lucide-react';
+import { CheckCircle2, Link2, RefreshCw, WifiOff } from 'lucide-react';
 import type { SavedItem } from '@curio/shared';
+import { Link } from 'react-router-dom';
 import { useClusters, useFacets, useInfiniteSearch, useLocalItems } from '../hooks/useItems';
 import { saveItemLocally } from '../services/indexeddb';
-import { SaveCard, SaveCardSkeleton } from '../components/SaveCard';
+import type { SearchParams } from '../services/api';
+import { PinCard, PinCardSkeleton, pinRatio } from '../components/SaveCard';
+import { Masonry, useMasonryColumns } from '../components/Masonry';
+import { SaveActionsSheet } from '../components/SaveActionsSheet';
 import { useOpenSaveSheet } from '../components/Layout';
 import { QuickSaveNudge } from '../components/QuickSaveNudge';
 import { COLLECTIONS, COLLECTION_TYPES } from '../utils/collections';
-import { platformMeta } from '../utils/platform';
 import { cn } from '../utils/cn';
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 20;
 
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 5) return 'Up late';
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
+interface Tab {
+  key: string;
+  label: string;
+  params: SearchParams;
+  done?: boolean;
 }
 
 export function HomePage() {
   const openSave = useOpenSaveSheet();
-  const [platform, setPlatform] = useState<string>('');
-  // "Done" shows the saves the user has finished with; everything else shows active ones
-  const [showDone, setShowDone] = useState(false);
   const { data: facets } = useFacets();
   const { data: clustersData } = useClusters();
-  const feed = useInfiniteSearch({
-    limit: PAGE_SIZE,
-    status: showDone ? 'done' : 'active',
-    ...(platform && !showDone ? { platform } : {}),
-  });
+  const columns = useMasonryColumns();
+  const [tabKey, setTabKey] = useState('all');
+  const [menuItem, setMenuItem] = useState<SavedItem | null>(null);
+
+  // Pinterest-style tabs: All, the smart collections you have, AI topics, Done
+  const tabs = useMemo<Tab[]>(() => {
+    const list: Tab[] = [{ key: 'all', label: 'All', params: {} }];
+    for (const t of COLLECTION_TYPES) {
+      if ((facets?.entities?.[t] ?? 0) > 0) list.push({ key: t, label: COLLECTIONS[t].title, params: { entity: t } });
+    }
+    for (const c of (clustersData?.clusters ?? []).slice(0, 6)) {
+      list.push({ key: `topic:${c.id}`, label: c.label, params: { q: c.label } });
+    }
+    if ((facets?.done ?? 0) > 0) list.push({ key: 'done', label: 'Done', params: {}, done: true });
+    return list;
+  }, [facets, clustersData]);
+  const tab = tabs.find(t => t.key === tabKey) ?? tabs[0];
+  const showDone = Boolean(tab.done);
+
+  const feed = useInfiniteSearch({ limit: PAGE_SIZE, ...tab.params, status: showDone ? 'done' : 'active' });
   const cached = useLocalItems(40, 0);
 
   const serverItems = useMemo(() => feed.data?.pages.flatMap(p => p.items) ?? [], [feed.data]);
   const offline = feed.isError && serverItems.length === 0;
-  const items: SavedItem[] = (offline
-    ? (cached.data ?? []).filter(i => !platform || i.platform === platform)
-    : serverItems
-  ).filter(i => Boolean(i.doneAt) === showDone); // a card leaves as soon as it's marked
+  const items: SavedItem[] = useMemo(
+    () => (offline && tab.key === 'all' ? cached.data ?? [] : serverItems).filter(i => Boolean(i.doneAt) === showDone),
+    [offline, tab.key, cached.data, serverItems, showDone],
+  );
 
   // Keep an offline copy of what the user has seen
   useEffect(() => {
@@ -54,42 +67,56 @@ export function HomePage() {
     if (!el) return;
     const io = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && feed.hasNextPage && !feed.isFetchingNextPage) void feed.fetchNextPage();
-    }, { rootMargin: '600px' });
+    }, { rootMargin: '800px' });
     io.observe(el);
     return () => io.disconnect();
   }, [feed.hasNextPage, feed.isFetchingNextPage, feed.fetchNextPage]);
 
-  const total = facets?.total ?? feed.data?.pages[0]?.total ?? items.length;
-  const thisWeek = items.filter(i => Date.now() - new Date(i.savedAt).getTime() < 7 * 86400_000).length;
-  const collectionTiles = COLLECTION_TYPES.filter(t => (facets?.entities?.[t] ?? 0) > 0);
-  const clusters = clustersData?.clusters ?? [];
-  const platforms = Object.entries(facets?.platforms ?? {}).filter(([, n]) => n > 0);
-  const doneCount = facets?.done ?? 0;
-  const isEmpty = !feed.isLoading && !offline && total === 0 && doneCount === 0;
-  const pick = (p: string, done: boolean) => { setPlatform(p); setShowDone(done); };
+  const total = facets?.total ?? 0;
+  const isEmpty = !feed.isLoading && !offline && total === 0 && (facets?.done ?? 0) === 0 && tab.key === 'all';
 
   return (
-    <div className="space-y-6">
-      <section className="pt-2 lg:flex lg:items-end lg:justify-between lg:gap-8 lg:pt-0">
+    <div className="space-y-4">
+      {/* Laptops: title and a paste box; phones keep the top bar's + */}
+      <section className="hidden items-end justify-between gap-8 lg:flex">
         <div>
-          <p className="text-[15px] text-muted-foreground">{greeting()}</p>
           <h1 className="screen-title lg:text-4xl">Your library</h1>
-          {total > 0 && (
-            <p className="mt-1 text-sm text-muted-foreground">
-              {total} {total === 1 ? 'save' : 'saves'}
-              {thisWeek > 0 && <> · <span className="text-foreground">{thisWeek} new this week</span></>}
-            </p>
-          )}
+          {total > 0 && <p className="mt-1 text-sm text-muted-foreground">{total} {total === 1 ? 'save' : 'saves'}</p>}
         </div>
         <QuickPaste onSave={openSave} />
       </section>
+
+      {tabs.length > 1 && (
+        <nav className="no-scrollbar -mx-4 flex gap-5 overflow-x-auto px-4 lg:mx-0 lg:px-0" role="tablist" aria-label="Filter saves">
+          {tabs.map(t => {
+            const active = t.key === tab.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => { setTabKey(t.key); window.scrollTo({ top: 0 }); }}
+                className={cn(
+                  'relative shrink-0 whitespace-nowrap pb-2 text-[16px] font-semibold transition-colors',
+                  active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {t.done && <CheckCircle2 className="mr-1 inline h-4 w-4 align-[-3px]" />}
+                {t.label}
+                {active && <span className="absolute inset-x-0 bottom-0 h-[3px] rounded-full bg-foreground" />}
+              </button>
+            );
+          })}
+        </nav>
+      )}
 
       {!isEmpty && <QuickSaveNudge />}
 
       {offline && (
         <div className="flex items-center gap-3 rounded-2xl border bg-card p-3 text-sm">
           <WifiOff className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="flex-1 text-muted-foreground">Can&rsquo;t reach CURIO right now. Showing saves stored on this device.</span>
+          <span className="flex-1 text-muted-foreground">Can&rsquo;t reach CURIO. Showing saves on this device.</span>
           <button type="button" onClick={() => feed.refetch()} className="rounded-full p-1.5 hover:bg-accent" aria-label="Retry">
             <RefreshCw className="h-4 w-4" />
           </button>
@@ -98,100 +125,30 @@ export function HomePage() {
 
       {isEmpty && <EmptyLibrary onSave={() => openSave()} />}
 
-      {(collectionTiles.length > 0 || clusters.length > 0) && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="section-label">Collections</h2>
-            <Link to="/collections" className="flex items-center text-sm font-medium text-primary">
-              See all <ChevronRight className="h-4 w-4" />
-            </Link>
-          </div>
-          <div className="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1">
-            {collectionTiles.map(type => {
-              const c = COLLECTIONS[type];
-              return (
-                <Link
-                  key={type}
-                  to={`/collections/${type}`}
-                  className={cn('pressable flex h-[104px] w-[132px] shrink-0 flex-col justify-between rounded-[22px] border bg-gradient-to-br p-3.5', c.tint)}
-                >
-                  <span className="text-2xl" aria-hidden="true">{c.emoji}</span>
-                  <span>
-                    <span className="block font-semibold leading-tight">{c.title}</span>
-                    <span className="text-xs text-muted-foreground">{facets?.entities[type]} saved</span>
-                  </span>
-                </Link>
-              );
-            })}
-            {clusters.slice(0, 8).map(cluster => (
-              <Link
-                key={cluster.id}
-                to={`/search?q=${encodeURIComponent(cluster.label)}`}
-                className="pressable flex h-[104px] w-[148px] shrink-0 flex-col justify-between rounded-[22px] border bg-card p-3.5"
-              >
-                <Sparkles className="h-5 w-5 text-primary" />
-                <span>
-                  <span className="block font-semibold leading-tight line-clamp-2">{cluster.label}</span>
-                  <span className="text-xs text-muted-foreground">{cluster.itemCount} saves</span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {(platforms.length > 1 || doneCount > 0 || showDone) && (
-        <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4" role="tablist" aria-label="Filter saves">
-          <button type="button" role="tab" aria-selected={!platform && !showDone} onClick={() => pick('', false)} className={cn('chip', !platform && !showDone && 'chip-active')}>
-            All
-          </button>
-          {platforms.map(([p, n]) => {
-            const meta = platformMeta(p);
-            const Icon = meta.icon;
-            return (
-              <button
-                key={p}
-                type="button"
-                role="tab"
-                aria-selected={platform === p && !showDone}
-                onClick={() => pick(platform === p && !showDone ? '' : p, false)}
-                className={cn('chip', platform === p && !showDone && 'chip-active')}
-              >
-                <Icon className="h-3.5 w-3.5" /> {meta.label} <span className="opacity-60">{n}</span>
-              </button>
-            );
-          })}
-          {(doneCount > 0 || showDone) && (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={showDone}
-              onClick={() => pick('', !showDone)}
-              className={cn('chip', showDone && 'chip-active')}
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" /> Done <span className="opacity-60">{doneCount}</span>
-            </button>
-          )}
-        </div>
-      )}
-
-      {showDone && !feed.isLoading && items.length === 0 && (
-        <p className="rounded-2xl border bg-card p-5 text-center text-sm text-muted-foreground">
-          Nothing marked done yet. Tap <CheckCircle2 className="inline h-4 w-4 align-[-3px]" /> on a save once you&rsquo;ve dealt with it.
+      {!isEmpty && !feed.isLoading && items.length === 0 && !offline && (
+        <p className="py-16 text-center text-sm text-muted-foreground">
+          {showDone ? 'Nothing marked done yet.' : 'Nothing here yet.'}
         </p>
       )}
 
-      <section aria-label="Saves">
-        <div className="grid gap-5 lg:grid-cols-2 lg:gap-6 xl:grid-cols-3">
-          {feed.isLoading && !offline && [0, 1, 2].map(i => <SaveCardSkeleton key={i} />)}
-          {items.map((item, i) => <SaveCard key={item.id} item={item} priority={i < 3} />)}
-          {feed.isFetchingNextPage && <SaveCardSkeleton />}
+      {feed.isLoading && !offline ? (
+        <div className="grid gap-[10px]" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+          {Array.from({ length: columns * 2 }, (_, i) => <PinCardSkeleton key={i} tall={i % 3 === 0} />)}
         </div>
-        <div ref={sentinel} />
-        {!showDone && !feed.hasNextPage && items.length > 3 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">You&rsquo;re all caught up ✨</p>
-        )}
-      </section>
+      ) : (
+        <Masonry
+          key={`${tab.key}:${columns}`}
+          items={items}
+          columns={columns}
+          estimateRatio={pinRatio}
+          render={item => <PinCard item={item} onMenu={setMenuItem} />}
+          className="-mx-2 lg:mx-0 lg:[--masonry-gap:16px] lg:[--masonry-row-gap:20px]"
+        />
+      )}
+      <div ref={sentinel} />
+      {feed.isFetchingNextPage && <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>}
+
+      <SaveActionsSheet item={menuItem} onClose={() => setMenuItem(null)} />
     </div>
   );
 }

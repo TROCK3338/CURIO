@@ -25,6 +25,8 @@ interface CoverProps {
   size?: 'sm' | 'md' | 'lg';
   /** Called with false when the cover falls back to the generated design */
   onImageAvailable?: (available: boolean) => void;
+  /** Called with the image's real width/height once it loads (masonry cards size to it) */
+  onNaturalSize?: (width: number, height: number) => void;
   children?: ReactNode;
 }
 
@@ -34,7 +36,7 @@ interface CoverProps {
  * render a generated cover (colour from the save id, platform mark, title)
  * instead of a broken image.
  */
-export function Cover({ item, className, showTitle = true, size = 'md', onImageAvailable, children }: CoverProps) {
+export function Cover({ item, className, showTitle = true, size = 'md', onImageAvailable, onNaturalSize, children }: CoverProps) {
   const [src, setSrc] = useState<string | null>(cleanImageUrl(item.thumbnailUrl));
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -91,9 +93,15 @@ export function Cover({ item, className, showTitle = true, size = 'md', onImageA
           decoding="async"
           ref={el => {
             // Cached images can finish before React attaches onLoad
-            if (el?.complete && el.naturalWidth > 0) setLoaded(true);
+            if (el?.complete && el.naturalWidth > 0) {
+              setLoaded(true);
+              onNaturalSize?.(el.naturalWidth, el.naturalHeight);
+            }
           }}
-          onLoad={() => setLoaded(true)}
+          onLoad={e => {
+            setLoaded(true);
+            onNaturalSize?.(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight);
+          }}
           onError={handleError}
           className={cn(
             'absolute inset-0 h-full w-full object-cover transition-opacity duration-500',
